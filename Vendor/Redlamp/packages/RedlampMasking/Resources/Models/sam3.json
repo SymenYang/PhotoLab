@@ -1,0 +1,78 @@
+{
+  "id": "sam3",
+  "version": 1,
+  "name": "SAM 3",
+  "purpose": "Landscape masks (water, vegetation, mountains, architecture, natural and artificial ground) and the People parts Vision can't give: hair, facial hair, body skin and clothes.",
+  "provider": "redlamp.sam3",
+  "assetPack": "models.sam3.v1",
+  "source": "https://github.com/pdcgomes/redlamp/releases/download/models-sam3-v1/",
+  "computeUnits": "cpuAndGPU",
+  "files": [
+    {
+      "path": "Sam3ImageEncoder.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+      "bytes": 606218,
+      "sha256": "acc64dc8879bf385913f93366e3560969f9c57a579d543803b3b255db3b7efe3"
+    },
+    {
+      "path": "Sam3ImageEncoder.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+      "bytes": 917318848,
+      "sha256": "fd22df3363dbf38c44be38684de64e6e6beb970f34825cdcfedf578a581be6fa"
+    },
+    {
+      "path": "Sam3ImageEncoder.mlpackage/Manifest.json",
+      "bytes": 617,
+      "sha256": "2b1b75f70b149f868e8849eb9bc1d169aa94012d07448b03abdefc57944da1af"
+    },
+    {
+      "path": "Sam3ImageEncoder.mlpackage/executorch_debug_handle_mapping.json",
+      "bytes": 562892,
+      "sha256": "f945e7a4bd14fb98c25b9e33694b5a9734884c95a5c8776b47955caf08ac3496"
+    },
+    {
+      "path": "Sam3TextDecoder.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+      "bytes": 758471,
+      "sha256": "d81f99fe16a78fe823373c803b72762c877b71f05cccef63f98ce7a36cc9a7bf"
+    },
+    {
+      "path": "Sam3TextDecoder.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+      "bytes": 67471680,
+      "sha256": "a6c29ecc017bdb9de413685d34976cb47e5f15c38d4c87b98280e347f1fd227f"
+    },
+    {
+      "path": "Sam3TextDecoder.mlpackage/Manifest.json",
+      "bytes": 617,
+      "sha256": "1a9ce8474c5add04061404a48d7aa65117806858053bb59ea8052a1312c4648f"
+    },
+    {
+      "path": "Sam3TextDecoder.mlpackage/executorch_debug_handle_mapping.json",
+      "bytes": 777868,
+      "sha256": "89bc7fb910fc6652813682ca54c2c08ad853ded38697d49544e4700ad87e3c9d"
+    },
+    {
+      "path": "Sam3Prompts.bin",
+      "bytes": 575680,
+      "sha256": "b335ec2e14099f358b03ad30e624126391d793820e0a2ddb0cb64e2d8b120d15"
+    },
+    {
+      "path": "Sam3Prompts.json",
+      "bytes": 5552,
+      "sha256": "36170ffcfc31468bbc122e491d862d92f3ce017598916d445bb0a6e8979b2d37"
+    },
+    {
+      "path": "LICENSE.txt",
+      "bytes": 7352,
+      "sha256": "bec48f70bd37bf8280a9d1ebf01642d26086f6122ba735baa08fe03c5a6e7448"
+    }
+  ],
+  "licenses": {
+    "code": "SAM License",
+    "weights": "SAM License",
+    "data": [
+      "SA-Co (unaudited)"
+    ]
+  },
+  "evaluationOnly": false,
+  "cleared": true,
+  "notes": "Converted by research/prototypes/masking/convert_sam3.py: the image encoder (fp16, 1008x1008) and the text-prompted decoder; the text features of 35 prompts (20 for Landscape, 15 for people parts) precomputed (Sam3Prompts.bin), so no text encoder ships. GPU: encoder 609 ms, decoder 86 ms per prompt on an M1 Ultra. Under Meta's SAM License, which comes with every download (LICENSE.txt), as it requires; the owner approved it for everyone (DEC-27). Published as the prerelease models-sam3-v1.",
+  "decision": "DEC-27"
+}

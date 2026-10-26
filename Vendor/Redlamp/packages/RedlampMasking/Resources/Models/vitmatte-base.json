@@ -1,0 +1,44 @@
+{
+  "id": "vitmatte-base",
+  "version": 2,
+  "name": "ViTMatte (base)",
+  "purpose": "Stray hairs on the edges of Subject, Background and People masks.",
+  "provider": "redlamp.vitmatte-base",
+  "assetPack": "models.vitmatte-base.v2",
+  "source": "https://github.com/pdcgomes/redlamp/releases/download/models-vitmatte-base-v2/",
+  "computeUnits": "cpuAndGPU",
+  "files": [
+    {
+      "path": "ViTMatteBaseW8RelPos16.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+      "bytes": 292930,
+      "sha256": "ed2a0743fb4605de6e3efda7a5decb185982fa62aa22f416abd91bcdc8c64e0b"
+    },
+    {
+      "path": "ViTMatteBaseW8RelPos16.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+      "bytes": 110835936,
+      "sha256": "9e1478dcc8134a0bde3b3728f0e988ca89e8bf80072b96f476a97c13f89cdb7f"
+    },
+    {
+      "path": "ViTMatteBaseW8RelPos16.mlpackage/Manifest.json",
+      "bytes": 617,
+      "sha256": "c76c48a9cc9f5460d88e2a7250a05cff57b797517b772ce7dc3f09cc3efd7ae5"
+    },
+    {
+      "path": "LICENSE.txt",
+      "bytes": 11957,
+      "sha256": "259a2f907ae702ed8740c6346a4a24572061a3e7c8d90757db059a95d33abc55"
+    }
+  ],
+  "licenses": {
+    "code": "MIT",
+    "weights": "Apache-2.0",
+    "data": [
+      "Composition-1k (from Adobe's Deep Image Matting dataset, distributed on request for research)",
+      "Distinctions-646"
+    ]
+  },
+  "decision": "DEC-35",
+  "evaluationOnly": false,
+  "cleared": true,
+  "notes": "Converted by research/prototypes/masking/convert_vitmatte.py (ViTMatte-base, fixed 1024x1024 tiles; the backbone's position embeddings frozen for that size) and compress_vitmatte.py (8-bit weights in blocks of 32; within 0.002 of fp16 on average over a portrait tile's unsure pixels). On hair_bench's heads, over a band from 1% of the long side inside the coarse edge to 5% outside, it halves closed-form matting's error along the edge and keeps 43% of the strands against 15% (vitmatte_bench.py). 0.2 s a tile on an M1 Ultra's GPU; the Neural Engine is slower. Its training data allows research use only; the owner accepted it for everyone as an exception (DEC-35). Version 2 (MSK-33) is version 1 with the 24 relative-position tables that global and windowed attention's matmuls take as constants back in float16 (decompress_vitmatte.py; 111.1 MB against 108.8): on macOS 27.0.1 Metal Performance Shaders Graph aborted in 28 of 1,296 fresh loads of version 1 on the GPU (vitmatte_gpu_probe.py), rebuilding such a matmul with another table's shape, and in none of 850 of version 2; on the GPU its Subject and People masks are version 1's bit for bit, on macOS 26 and 27. Published, with the owner's approval (DEC-26), as the prerelease models-vitmatte-base-v2, with its licence (LICENSE.txt); version 1 stays as models-vitmatte-base-v1. On its own, on the evaluation set's photos it pulls background beside the subject into the matte (dark, flat or foliage backgrounds); the app adds to closed-form matting's matte only the strands it finds (ViTMatte.strands), which adds over a quarter of coverage on at most 0.07% of a frame, mostly hair (vitmatte_bench.py eval --folder eval-strands-app), so it is cleared for everyone again."
+}

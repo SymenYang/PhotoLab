@@ -1,0 +1,345 @@
+import Foundation
+import Metal
+import RedlampEngineAPI
+import RedlampKernels
+import simd
+
+/// Content-aware fill for Remove spots (RM-07): exemplar-based inpainting (Criminisi, Pérez and
+/// Toyama, "Region filling and object removal by exemplar-based image inpainting", 2004, whose
+/// patents have expired).
+///
+/// The hole is filled from its edge inwards, one 9 × 9 patch at a time: first where confidence
+/// (how much of the patch is the photo rather than fill) and structure (an edge running into the
+/// hole, across its edge) are greatest, so lines are continued before flat areas are filled. Each
+/// patch is copied from the patch around the hole that best matches what's known of it, found by
+/// scoring every candidate on the GPU (`rl_fill_costs`), not by PatchMatch's randomised search.
+final class ContentAwareFill {
+    struct Region {
+        let width: Int
+        let height: Int
+        /// Perceptual (square-root) camera RGB.
+        var pixels: [SIMD3<Float>]
+        /// The pixels to fill.
+        let hole: [Bool]
+        /// Pixels no source patch may touch, since the edit removes or covers them too; empty for
+        /// none.
+        var avoided: [Bool] = []
+        /// Pixels the edit replaces after this fill, which patches aren't matched on either;
+        /// empty for none.
+        var replaced: [Bool] = []
+
+        func avoids(_ index: Int) -> Bool {
+            hole[index] || !avoided.isEmpty && avoided[index]
+        }
+
+        func knows(_ index: Int) -> Bool {
+            !hole[index] && (replaced.isEmpty || !replaced[index])
+        }
+    }
+
+    /// Patches are (2 × half + 1) texels across.
+    static let half = 4
+    /// Candidates are scored on every second texel, then the best one's neighbours on every texel.
+    static let stride = 2
+
+    private let device: any MTLDevice
+    private let queue: any MTLCommandQueue
+    private let kernels: KernelLibrary
+
+    init(device: any MTLDevice, queue: any MTLCommandQueue, kernels: KernelLibrary) {
+        self.device = device
+        self.queue = queue
+        self.kernels = kernels
+    }
+
+    /// Where each hole pixel copies from, as a move in the region's texels (zero outside the hole,
+    /// and wherever no candidate fits).
+    func fill(_ region: Region) throws -> [SIMD2<Int32>] {
+        let (width, height, half) = (region.width, region.height, Self.half)
+        let count = width * height
+        var offsets = [SIMD2<Int32>](repeating: .zero, count: count)
+        guard width > 2 * half + 1, height > 2 * half + 1, region.hole.contains(true) else { return offsets }
+        guard let imageBuffer = device.makeBuffer(length: count * 16, options: .storageModeShared),
+              let knownBuffer = device.makeBuffer(length: count, options: .storageModeShared),
+              let sourceBuffer = device.makeBuffer(length: count, options: .storageModeShared)
+        else { throw EngineError.gpuUnavailable }
+        let image = imageBuffer.contents().bindMemory(to: SIMD4<Float>.self, capacity: count)
+        let known = knownBuffer.contents().bindMemory(to: UInt8.self, capacity: count)
+        let sourceOK = sourceBuffer.contents().bindMemory(to: UInt8.self, capacity: count)
+        for index in 0 ..< count {
+            image[index] = SIMD4(region.pixels[index], 0)
+            known[index] = region.knows(index) ? 1 : 0
+        }
+        // A source patch lies inside the region and touches no hole or avoided pixel (an integral
+        // image of them).
+        var integral = [Int](repeating: 0, count: (width + 1) * (height + 1))
+        for y in 0 ..< height {
+            var row = 0
+            for x in 0 ..< width {
+                row += region.avoids(y * width + x) ? 1 : 0
+                integral[(y + 1) * (width + 1) + x + 1] = integral[y * (width + 1) + x + 1] + row
+            }
+        }
+        var anySource = false
+        for y in 0 ..< height {
+            for x in 0 ..< width {
+                guard x >= half, y >= half, x < width - half, y < height - half else {
+                    sourceOK[y * width + x] = 0
+                    continue
+                }
+                let (x0, y0, x1, y1) = (x - half, y - half, x + half + 1, y + half + 1)
+                let holes = integral[y1 * (width + 1) + x1] - integral[y0 * (width + 1) + x1]
+                    - integral[y1 * (width + 1) + x0] + integral[y0 * (width + 1) + x0]
+                sourceOK[y * width + x] = holes == 0 ? 1 : 0
+                anySource = anySource || holes == 0
+            }
+        }
+        guard anySource else { return offsets }
+
+        let gridWidth = (width - 2 * half + Self.stride - 1) / Self.stride
+        let gridHeight = (height - 2 * half + Self.stride - 1) / Self.stride
+        guard let costBuffer = device.makeBuffer(length: gridWidth * gridHeight * 4, options: .storageModeShared)
+        else { throw EngineError.gpuUnavailable }
+        let costs = costBuffer.contents().bindMemory(to: Float.self, capacity: gridWidth * gridHeight)
+
+        // The front only ever lies within the hole's bounds.
+        var low = SIMD2(width, height), high = SIMD2(-1, -1)
+        for y in 0 ..< height {
+            for x in 0 ..< width where region.hole[y * width + x] {
+                low = simd_min(low, SIMD2(x, y))
+                high = simd_max(high, SIMD2(x, y))
+            }
+        }
+        var confidence = (0 ..< count).map { region.knows($0) ? Float(1) : 0 }
+        var pending = region.hole
+        var remaining = region.hole.filter(\.self).count
+        func luma(_ index: Int) -> Float {
+            simd_dot(SIMD3(image[index].x, image[index].y, image[index].z), SIMD3(0.27, 0.67, 0.06))
+        }
+        // The front's priorities, recomputed only where a patch changed them: what a scan of the
+        // whole front would choose, in a fraction of the time on large holes.
+        var front = Front(width: width)
+        func prioritise(_ x: Int, _ y: Int) {
+            let index = y * width + x
+            guard pending[index], onFront(x, y, width: width, height: height, known: known) else { return }
+            let point = SIMD2(x, y)
+            front.push(
+                index, priority: averageConfidence(point, width: width, height: height, confidence: confidence)
+                    * (dataTerm(point, width: width, height: height, known: known, luma: luma) + 0.001),
+            )
+        }
+        for y in low.y ... high.y {
+            for x in low.x ... high.x {
+                prioritise(x, y)
+            }
+        }
+        while remaining > 0 {
+            guard let next = front.pop(where: { pending[$0] }) else { break }
+            let target = SIMD2(next % width, next / width)
+            var params = FillCostParams(
+                size: SIMD4(Int32(width), Int32(height), Int32(half), Int32(Self.stride)),
+                target: SIMD4(Int32(target.x), Int32(target.y), 0, 0),
+                candidates: SIMD4(Int32(half), Int32(half), Int32(gridWidth), Int32(gridHeight)),
+            )
+            guard let commands = queue.makeCommandBuffer(), let encoder = commands.makeComputeCommandEncoder()
+            else { throw EngineError.gpuUnavailable }
+            encoder.setComputePipelineState(kernels.fillCosts)
+            encoder.setBytes(&params, length: MemoryLayout<FillCostParams>.stride, index: 0)
+            encoder.setBuffer(imageBuffer, offset: 0, index: 1)
+            encoder.setBuffer(knownBuffer, offset: 0, index: 2)
+            encoder.setBuffer(sourceBuffer, offset: 0, index: 3)
+            encoder.setBuffer(costBuffer, offset: 0, index: 4)
+            encoder.dispatchGrid(width: gridWidth, height: gridHeight, pipeline: kernels.fillCosts)
+            encoder.endEncoding()
+            commands.commit()
+            commands.waitUntilCompleted()
+            var best = -1
+            var bestCost = Float.infinity
+            for index in 0 ..< gridWidth * gridHeight where costs[index] < bestCost {
+                bestCost = costs[index]
+                best = index
+            }
+            guard best >= 0 else { break }
+            var source = SIMD2(half + (best % gridWidth) * Self.stride, half + (best / gridWidth) * Self.stride)
+            // The skipped texels around the best candidate.
+            for dy in -1 ... 1 {
+                for dx in -1 ... 1 where dx != 0 || dy != 0 {
+                    let q = source &+ SIMD2(dx, dy)
+                    guard q.x >= 0, q.y >= 0, q.x < width, q.y < height,
+                          sourceOK[q.y * width + q.x] == 1 else { continue }
+                    let cost = patchCost(
+                        target: target,
+                        source: q,
+                        width: width,
+                        height: height,
+                        image: image,
+                        known: known,
+                    )
+                    if cost < bestCost {
+                        bestCost = cost
+                        source = q
+                    }
+                }
+            }
+            let patchConfidence = averageConfidence(target, width: width, height: height, confidence: confidence)
+            for dy in -half ... half {
+                for dx in -half ... half {
+                    let t = target &+ SIMD2(dx, dy)
+                    guard t.x >= 0, t.y >= 0, t.x < width, t.y < height, pending[t.y * width + t.x] else { continue }
+                    let s = source &+ SIMD2(dx, dy)
+                    image[t.y * width + t.x] = image[s.y * width + s.x]
+                    pending[t.y * width + t.x] = false
+                    known[t.y * width + t.x] = 1
+                    confidence[t.y * width + t.x] = patchConfidence
+                    offsets[t.y * width + t.x] = SIMD2(Int32(source.x - target.x), Int32(source.y - target.y))
+                    remaining -= 1
+                }
+            }
+            // Confidence reaches a patch's width beyond what it filled; the front and the data
+            // term less.
+            for y in max(target.y - 2 * half, low.y) ... min(target.y + 2 * half, high.y) {
+                for x in max(target.x - 2 * half, low.x) ... min(target.x + 2 * half, high.x) {
+                    prioritise(x, y)
+                }
+            }
+        }
+        return offsets
+    }
+
+    /// Pending pixels and their priorities, highest first, the first in scan order on a tie; a
+    /// pixel pushed again supersedes its earlier entries.
+    private struct Front {
+        private var heap: [(priority: Float, index: Int, version: Int)] = []
+        private var versions: [Int: Int] = [:]
+        let width: Int
+
+        init(width: Int) {
+            self.width = width
+        }
+
+        mutating func push(_ index: Int, priority: Float) {
+            let version = (versions[index] ?? 0) + 1
+            versions[index] = version
+            heap.append((priority, index, version))
+            var child = heap.count - 1
+            while child > 0 {
+                let parent = (child - 1) / 2
+                guard Self.precedes(heap[child], heap[parent]) else { break }
+                heap.swapAt(child, parent)
+                child = parent
+            }
+        }
+
+        /// The highest-priority pixel still current and `valid`.
+        mutating func pop(where valid: (Int) -> Bool) -> Int? {
+            while let top = heap.first {
+                let last = heap.removeLast()
+                if !heap.isEmpty {
+                    heap[0] = last
+                    var parent = 0
+                    while true {
+                        let (left, right) = (2 * parent + 1, 2 * parent + 2)
+                        var first = parent
+                        if left < heap.count, Self.precedes(heap[left], heap[first]) {
+                            first = left
+                        }
+                        if right < heap.count, Self.precedes(heap[right], heap[first]) {
+                            first = right
+                        }
+                        guard first != parent else { break }
+                        heap.swapAt(parent, first)
+                        parent = first
+                    }
+                }
+                if versions[top.index] == top.version, valid(top.index) {
+                    return top.index
+                }
+            }
+            return nil
+        }
+
+        private static func precedes(
+            _ a: (priority: Float, index: Int, version: Int), _ b: (priority: Float, index: Int, version: Int),
+        ) -> Bool {
+            a.priority > b.priority || a.priority == b.priority && a.index < b.index
+        }
+    }
+
+    private func onFront(_ x: Int, _ y: Int, width: Int, height: Int, known: UnsafeMutablePointer<UInt8>) -> Bool {
+        [(1, 0), (-1, 0), (0, 1), (0, -1)].contains { dx, dy in
+            let (nx, ny) = (x + dx, y + dy)
+            return nx >= 0 && ny >= 0 && nx < width && ny < height && known[ny * width + nx] == 1
+        }
+    }
+
+    private func averageConfidence(_ point: SIMD2<Int>, width: Int, height: Int, confidence: [Float]) -> Float {
+        let half = Self.half
+        var sum: Float = 0
+        for dy in -half ... half {
+            for dx in -half ... half {
+                let (x, y) = (point.x + dx, point.y + dy)
+                if x >= 0, y >= 0, x < width, y < height {
+                    sum += confidence[y * width + x]
+                }
+            }
+        }
+        return sum / Float((2 * half + 1) * (2 * half + 1))
+    }
+
+    /// How strongly an edge runs into the hole here: the isophote (along the edge) against the
+    /// front's normal. Both come from known pixels only.
+    private func dataTerm(
+        _ point: SIMD2<Int>, width: Int, height: Int, known: UnsafeMutablePointer<UInt8>, luma: (Int) -> Float,
+    ) -> Float {
+        var normal = SIMD2<Float>.zero
+        var gradient = SIMD2<Float>.zero
+        var pairs = SIMD2<Float>.zero
+        for dy in -1 ... 1 {
+            for dx in -1 ... 1 where dx != 0 || dy != 0 {
+                let (x, y) = (point.x + dx, point.y + dy)
+                guard x >= 0, y >= 0, x < width, y < height else { continue }
+                if known[y * width + x] == 1 {
+                    normal += SIMD2(Float(dx), Float(dy))
+                }
+            }
+        }
+        // Central differences of luminance across known pairs around the point.
+        for dy in -1 ... 1 {
+            for dx in -1 ... 1 {
+                let (x, y) = (point.x + dx, point.y + dy)
+                guard x >= 1, y >= 1, x < width - 1, y < height - 1 else { continue }
+                let index = y * width + x
+                if known[index - 1] == 1, known[index + 1] == 1 {
+                    gradient.x += (luma(index + 1) - luma(index - 1)) / 2
+                    pairs.x += 1
+                }
+                if known[index - width] == 1, known[index + width] == 1 {
+                    gradient.y += (luma(index + width) - luma(index - width)) / 2
+                    pairs.y += 1
+                }
+            }
+        }
+        guard simd_length(normal) > 0 else { return 0 }
+        gradient /= simd_max(pairs, SIMD2(repeating: 1))
+        let isophote = SIMD2(-gradient.y, gradient.x)
+        return abs(simd_dot(isophote, simd_normalize(normal)))
+    }
+
+    private func patchCost(
+        target: SIMD2<Int>, source: SIMD2<Int>, width: Int, height: Int, image: UnsafeMutablePointer<SIMD4<Float>>,
+        known: UnsafeMutablePointer<UInt8>,
+    ) -> Float {
+        let half = Self.half
+        var sum: Float = 0
+        for dy in -half ... half {
+            for dx in -half ... half {
+                let t = target &+ SIMD2(dx, dy)
+                guard t.x >= 0, t.y >= 0, t.x < width, t.y < height, known[t.y * width + t.x] == 1 else { continue }
+                let s = source &+ SIMD2(dx, dy)
+                let d = image[t.y * width + t.x] - image[s.y * width + s.x]
+                sum += d.x * d.x + d.y * d.y + d.z * d.z
+            }
+        }
+        return sum
+    }
+}

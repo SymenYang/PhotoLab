@@ -1,0 +1,43 @@
+{
+  "id": "depth-anything-3-mono-large",
+  "version": 2,
+  "name": "Depth Anything 3 (mono, large)",
+  "purpose": "Sky masks (with Segment Anything) and Depth Range masks, from one model.",
+  "provider": "redlamp.depth-anything-3-mono-large",
+  "assetPack": "models.depth-anything-3-mono-large.v2",
+  "source": "https://github.com/pdcgomes/redlamp/releases/download/models-depth-anything-3-mono-large-v2/",
+  "computeUnits": "cpuAndGPU",
+  "files": [
+    {
+      "path": "DepthAnything3MonoLargeW8.mlpackage/Data/com.apple.CoreML/model.mlmodel",
+      "bytes": 667960,
+      "sha256": "7f2a0d2f71a2d0c2dcc2fec649e12dd6e94bcd84444b77a921e3a03fad45c975"
+    },
+    {
+      "path": "DepthAnything3MonoLargeW8.mlpackage/Data/com.apple.CoreML/weights/weight.bin",
+      "bytes": 335421760,
+      "sha256": "1cbd9be2cd788c377d067f92024f535e67f26e299435810368e6e1916a7ab16c"
+    },
+    {
+      "path": "DepthAnything3MonoLargeW8.mlpackage/Manifest.json",
+      "bytes": 617,
+      "sha256": "995ecaf9a1003cbc29552a102dff387fe20c37aa16f916ee4fa1f8b052381fa5"
+    },
+    {
+      "path": "LICENSE.txt",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  ],
+  "licenses": {
+    "code": "Apache-2.0",
+    "weights": "Apache-2.0",
+    "data": [
+      "Depth Anything 3 academic mix (unaudited)"
+    ]
+  },
+  "decision": "DEC-02",
+  "evaluationOnly": false,
+  "cleared": true,
+  "notes": "Converted by research/prototypes/masking/convert_da3.py (fixed 504x336 landscape and 336x504 portrait inputs) and compress_da3.py (8-bit weights; sky agreement with fp16 >= 0.997), merged into one package with a landscape and a portrait function that share their weights. Published as the prerelease models-depth-anything-3-mono-large-v2, with its licence (LICENSE.txt). GPU 126 ms per photo on an M1 Ultra; the Neural Engine is slower. Training data ('public academic datasets') unaudited; the owner approved it for everyone, as an exception to DEC-24 (DEC-02)."
+}

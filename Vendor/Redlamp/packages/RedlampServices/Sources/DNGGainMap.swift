@@ -1,0 +1,217 @@
+import Foundation
+
+/// A GainMap opcode (DNG 1.3, opcode 9): a grid of gains over part of the image, applied to the
+/// linear raw values of some planes before demosaicing. Phones and some converters store their
+/// lens shading correction this way, one map per Bayer position.
+public struct GainMap: Codable, Sendable, Hashable {
+    /// The area it applies to, in image pixels: rows `top ..< bottom`, columns `left ..< right`.
+    public var top: Int
+    public var left: Int
+    public var bottom: Int
+    public var right: Int
+    /// The first plane and how many (for a mosaic, plane 0).
+    public var plane: Int
+    public var planes: Int
+    /// Only every `rowPitch`-th row and `columnPitch`-th column from the area's corner.
+    public var rowPitch: Int
+    public var columnPitch: Int
+    public var pointsV: Int
+    public var pointsH: Int
+    /// Sample spacing and the first sample's position, in fractions of the image's size.
+    public var spacingV: Double
+    public var spacingH: Double
+    public var originV: Double
+    public var originH: Double
+    public var mapPlanes: Int
+    /// `pointsV x pointsH x mapPlanes`, planes fastest.
+    public var gains: [Float]
+
+    public init(
+        top: Int, left: Int, bottom: Int, right: Int,
+        plane: Int, planes: Int, rowPitch: Int, columnPitch: Int,
+        pointsV: Int, pointsH: Int, spacingV: Double, spacingH: Double, originV: Double, originH: Double,
+        mapPlanes: Int, gains: [Float],
+    ) {
+        self.top = top
+        self.left = left
+        self.bottom = bottom
+        self.right = right
+        self.plane = plane
+        self.planes = planes
+        self.rowPitch = rowPitch
+        self.columnPitch = columnPitch
+        self.pointsV = pointsV
+        self.pointsH = pointsH
+        self.spacingV = spacingV
+        self.spacingH = spacingH
+        self.originV = originV
+        self.originH = originH
+        self.mapPlanes = mapPlanes
+        self.gains = gains
+    }
+
+    /// The most grid values a map may hold.
+    static let maximumGains = 1 << 20
+    /// The most maps a photo may have.
+    static let maximumCount = 64
+
+    /// Whether a photo's maps can be applied: few enough, each valid.
+    public static func areValid(_ maps: [GainMap]) -> Bool {
+        maps.count <= maximumCount && maps.allSatisfy(\.isValid)
+    }
+
+    /// Whether the map can be applied as it is: an area and planes the GPU's 32-bit indices
+    /// reach, a grid of at least one point with finite placement, and one finite, positive gain
+    /// per point and plane. An empty area (`top == bottom`) is valid, and never applies.
+    public var isValid: Bool {
+        hasValidLayout && gains.allSatisfy { $0.isFinite && $0 > 0 }
+    }
+
+    /// `isValid` but for the gains' values.
+    var hasValidLayout: Bool {
+        func index(_ value: Int, from minimum: Int = 0) -> Bool {
+            value >= minimum && value <= Int(Int32.max)
+        }
+        guard index(top), index(left), index(bottom, from: top), index(right, from: left),
+              index(plane), index(planes, from: 1), index(plane + planes),
+              index(rowPitch, from: 1), index(columnPitch, from: 1), index(mapPlanes, from: 1),
+              let count = Self.count(pointsV, pointsH, mapPlanes), count == gains.count,
+              spacingV.isFinite, spacingV > 0, spacingH.isFinite, spacingH > 0, originV.isFinite, originH.isFinite
+        else {
+            return false
+        }
+        return true
+    }
+
+    /// `pointsV x pointsH x mapPlanes`, or nil if a factor isn't positive or the product is
+    /// over `maximumGains`.
+    static func count(_ pointsV: Int, _ pointsH: Int, _ mapPlanes: Int) -> Int? {
+        TIFFReader.product(pointsV, pointsH, mapPlanes).flatMap { $0 <= maximumGains ? $0 : nil }
+    }
+
+    /// The gain for one plane of a pixel, bilinear on the grid; nil where the map doesn't apply
+    /// or isn't valid. Mirrors `gainAt` in Demosaic.metal.
+    public func gain(x: Int, y: Int, plane: Int, width: Int, height: Int) -> Float? {
+        guard hasValidLayout, width > 0, height > 0,
+              (top ..< bottom).contains(y), (left ..< right).contains(x),
+              (y - top) % rowPitch == 0, (x - left) % columnPitch == 0,
+              (self.plane ..< self.plane + planes).contains(plane)
+        else {
+            return nil
+        }
+        let v = min(max((Double(y) / Double(height) - originV) / spacingV, 0), Double(pointsV - 1))
+        let h = min(max((Double(x) / Double(width) - originH) / spacingH, 0), Double(pointsH - 1))
+        let (v0, h0) = (Int(v), Int(h))
+        let (v1, h1) = (min(v0 + 1, pointsV - 1), min(h0 + 1, pointsH - 1))
+        let base = min(plane - self.plane, mapPlanes - 1)
+        func at(_ row: Int, _ column: Int) -> Float {
+            gains[base + (row * pointsH + column) * mapPlanes]
+        }
+        let (fv, fh) = (Float(v - Double(v0)), Float(h - Double(h0)))
+        let upper = at(v0, h0) + (at(v0, h1) - at(v0, h0)) * fh
+        let lower = at(v1, h0) + (at(v1, h1) - at(v1, h0)) * fh
+        return upper + (lower - upper) * fv
+    }
+}
+
+extension GainMap {
+    private enum CodingKeys: String, CodingKey {
+        case top, left, bottom, right, plane, planes, rowPitch, columnPitch, pointsV, pointsH
+        case spacingV, spacingH, originV, originH, mapPlanes, gains
+    }
+
+    /// Only a valid map decodes: the decode service's reply is checked as the app receives it.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func int(_ key: CodingKeys) throws -> Int {
+            try container.decode(Int.self, forKey: key)
+        }
+        func double(_ key: CodingKeys) throws -> Double {
+            try container.decode(Double.self, forKey: key)
+        }
+        try self.init(
+            top: int(.top), left: int(.left), bottom: int(.bottom), right: int(.right),
+            plane: int(.plane), planes: int(.planes), rowPitch: int(.rowPitch), columnPitch: int(.columnPitch),
+            pointsV: int(.pointsV), pointsH: int(.pointsH), spacingV: double(.spacingV), spacingH: double(.spacingH),
+            originV: double(.originV), originH: double(.originH), mapPlanes: int(.mapPlanes),
+            gains: container.decode([Float].self, forKey: .gains),
+        )
+        guard isValid else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "invalid gain map",
+            ))
+        }
+    }
+}
+
+/// Reads the GainMap opcodes of a DNG's OpcodeList2 (tag 0xC741). Opcode lists are big-endian
+/// whatever the file's byte order. Other opcodes in the list are skipped.
+enum DNGGainMaps {
+    static let opcodeList2: UInt16 = 0xC741
+    static let gainMapOpcode: UInt32 = 9
+
+    /// `url` names the file `data` holds.
+    static func read(_ data: Data, url: URL) -> [GainMap] {
+        guard url.pathExtension.lowercased() == "dng" else {
+            return []
+        }
+        return data.withUnsafeBytes { bytes in
+            guard let reader = TIFFReader(bytes: bytes) else { return [] }
+            for entries in reader.imageFileDirectories() {
+                for entry in entries where entry.tag == opcodeList2 && entry.count > 4 {
+                    let start = Int(reader.u32(entry.valueOffset))
+                    guard start + entry.count <= bytes.count else { continue }
+                    let maps = parse(UnsafeRawBufferPointer(rebasing: bytes[start ..< start + entry.count]))
+                    if !maps.isEmpty {
+                        return maps
+                    }
+                }
+            }
+            return []
+        }
+    }
+
+    /// Parses an opcode list; exposed for tests. A damaged gain map drops them all: applying the
+    /// rest of a Bayer set would tint the photo.
+    static func parse(_ list: UnsafeRawBufferPointer) -> [GainMap] {
+        func u32(_ offset: Int) -> UInt32? {
+            guard offset >= 0, offset + 4 <= list.count else { return nil }
+            return UInt32(bigEndian: list.loadUnaligned(fromByteOffset: offset, as: UInt32.self))
+        }
+        func f64(_ offset: Int) -> Double? {
+            guard offset + 8 <= list.count else { return nil }
+            return Double(bitPattern: UInt64(bigEndian: list.loadUnaligned(fromByteOffset: offset, as: UInt64.self)))
+        }
+        func f32(_ offset: Int) -> Float? {
+            u32(offset).map { Float(bitPattern: $0) }
+        }
+        guard let count = u32(0) else { return [] }
+        var maps: [GainMap] = []
+        var offset = 4
+        for _ in 0 ..< min(Int(count), GainMap.maximumCount) {
+            guard let id = u32(offset), let size = u32(offset + 12) else { break }
+            let body = offset + 16
+            offset = body + Int(size)
+            guard id == gainMapOpcode else { continue }
+            let v = (0 ..< 10).compactMap { u32(body + $0 * 4) }.map(Int.init)
+            guard offset <= list.count, v.count == 10,
+                  let spacingV = f64(body + 40), let spacingH = f64(body + 48),
+                  let originV = f64(body + 56), let originH = f64(body + 64),
+                  let mapPlanes = u32(body + 72).map(Int.init),
+                  let total = GainMap.count(v[8], v[9], mapPlanes), body + 76 + total * 4 <= offset
+            else {
+                return []
+            }
+            let map = GainMap(
+                top: v[0], left: v[1], bottom: v[2], right: v[3], plane: v[4], planes: v[5],
+                rowPitch: v[6], columnPitch: v[7], pointsV: v[8], pointsH: v[9],
+                spacingV: spacingV, spacingH: spacingH, originV: originV, originH: originH,
+                mapPlanes: mapPlanes, gains: (0 ..< total).compactMap { f32(body + 76 + $0 * 4) },
+            )
+            guard map.isValid else { return [] }
+            maps.append(map)
+        }
+        return maps
+    }
+}

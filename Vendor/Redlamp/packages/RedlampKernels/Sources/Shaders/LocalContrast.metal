@@ -1,0 +1,86 @@
+#include "RedlampShaderTypes.h"
+
+// Texture and Clarity: gains on bands of log-luminance detail between pyramid levels. The bands
+// come from the whole-image pyramid, so a work area needs no margin for them and tiles agree.
+
+struct LocalContrastParams {
+    int4 origin;              // xy source texel of the work area's first texel, z source level
+    int4 size;                // xy work area size, z masks' Texture and Clarity in `local`
+    int4 place;               // xy work area origin in pyramid texels at the work level, z work level
+    int4 levels;              // xy Texture's fine and coarse pyramid levels (0 0 for none), zw Clarity's
+    float4 luma;              // xyz pyramid RGB to luminance, w floor added before the log
+    float4 shape;             // x Texture, y Clarity (slider / 100), z Clarity limit (stops), w edge-aware Clarity's gain (process 9; 0 per level)
+};
+
+// Log luminance of a pyramid level at `uv`, cubic B-spline interpolated (four bilinear taps), so
+// the coarse levels come back smooth rather than with the bilinear grid.
+static inline float logLumaAt(texture2d<float, access::sample> pyramid, float2 uv, int mip, float4 luma) {
+    constexpr sampler s(coord::normalized, filter::linear, mip_filter::nearest, address::clamp_to_edge);
+    float2 size = float2(pyramid.get_width(uint(mip)), pyramid.get_height(uint(mip)));
+    float2 position = uv * size - 0.5f;
+    float2 i = floor(position);
+    float2 f = position - i;
+    float2 f2 = f * f;
+    float2 f3 = f2 * f;
+    float2 w0 = (1.0f - 3.0f * f + 3.0f * f2 - f3) / 6.0f;
+    float2 w1 = (4.0f - 6.0f * f2 + 3.0f * f3) / 6.0f;
+    float2 w2 = (1.0f + 3.0f * f + 3.0f * f2 - 3.0f * f3) / 6.0f;
+    float2 w3 = f3 / 6.0f;
+    float2 g0 = w0 + w1;
+    float2 g1 = w2 + w3;
+    float2 h0 = (i - 0.5f + w1 / g0) / size;
+    float2 h1 = (i + 1.5f + w3 / g1) / size;
+    float lod = float(mip);
+    float3 c = g0.y * (g0.x * pyramid.sample(s, float2(h0.x, h0.y), level(lod)).rgb
+                       + g1.x * pyramid.sample(s, float2(h1.x, h0.y), level(lod)).rgb)
+             + g1.y * (g0.x * pyramid.sample(s, float2(h0.x, h1.y), level(lod)).rgb
+                       + g1.x * pyramid.sample(s, float2(h1.x, h1.y), level(lod)).rgb);
+    return log2(max(dot(c, luma.xyz), 0.0f) + luma.w);
+}
+
+kernel void rl_local_contrast(
+    texture2d<float, access::read> source [[texture(0)]],
+    texture2d<float, access::sample> pyramid [[texture(1)]],
+    texture2d<float, access::write> out [[texture(2)]],
+    texture2d<float, access::read> local [[texture(3)]],
+    texture2d<float, access::sample> clarityBase [[texture(4)]],
+    constant LocalContrastParams &p [[buffer(0)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (int(gid.x) >= p.size.x || int(gid.y) >= p.size.y) return;
+    uint sourceLevel = uint(p.origin.z);
+    int2 sourceSize = int2(source.get_width(sourceLevel), source.get_height(sourceLevel));
+    float3 rgb = source.read(uint2(clamp(int2(gid) + p.origin.xy, int2(0), sourceSize - 1)), sourceLevel).rgb;
+
+    uint workLevel = uint(p.place.z);
+    float2 levelSize = float2(pyramid.get_width(workLevel), pyramid.get_height(workLevel));
+    float2 uv = (float2(p.place.xy) + float2(gid) + 0.5f) / levelSize;
+    float2 amounts = p.shape.xy + (p.size.z != 0 ? local.read(gid).xy : float2(0.0f));
+    // Removing all of Texture's band looks blurred, so negative Texture only softens it.
+    float texture = amounts.x > 0.0f ? amounts.x : 0.5f * amounts.x;
+    float clarity = (p.shape.w > 0.0f ? p.shape.w : 0.7f) * amounts.y;
+    float boost = 0.0f;
+    if (texture != 0.0f && p.levels.x <= p.levels.y && p.levels.y > 0) {
+        // Rendering at or below the band's fine level, the texels themselves are the fine detail:
+        // the smoothed level would lose the octave a downscaled full-resolution result keeps.
+        float fine = p.levels.x <= int(workLevel) ? log2(max(dot(rgb, p.luma.xyz), 0.0f) + p.luma.w)
+                                                  : logLumaAt(pyramid, uv, p.levels.x, p.luma);
+        boost += texture * (fine - logLumaAt(pyramid, uv, p.levels.y, p.luma));
+    }
+    if (clarity != 0.0f && p.levels.z < p.levels.w) {
+        float detail;
+        if (p.shape.w > 0.0f) {
+            // Edge-aware (`ClarityBase`): the band ends at an edge-preserving base, in its own
+            // log luminance, so a strong edge isn't Clarity's detail.
+            constexpr sampler baseSampler(coord::normalized, filter::linear, address::clamp_to_edge);
+            float fine = logLumaAt(pyramid, uv, p.levels.z, float4(0.25f, 0.5f, 0.25f, p.luma.w));
+            float2 ab = clarityBase.sample(baseSampler, uv).rg;
+            detail = fine - (ab.x * fine + ab.y);
+        } else {
+            detail = logLumaAt(pyramid, uv, p.levels.z, p.luma) - logLumaAt(pyramid, uv, p.levels.w, p.luma);
+        }
+        float limit = p.shape.z;
+        boost += clarity * limit * tanh(detail / limit);
+    }
+    out.write(float4(rgb * exp2(boost), 1.0f), gid);
+}

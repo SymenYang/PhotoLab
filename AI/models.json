@@ -1,0 +1,54 @@
+[
+  {
+    "id": "siglip",
+    "repo": "google/siglip2-base-patch16-256",
+    "revision": "3f9f96cb90da5dbc758b01813f2f6f1aee24c1ab",
+    "key": "model",
+    "size": "约 1.6 GB",
+    "environment": "embedding",
+    "title": "SigLIP · 语义检索与相似照片",
+    "license": "Apache-2.0.txt",
+    "licenseSHA256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "licenseURL": "https://huggingface.co/google/siglip2-base-patch16-256/tree/3f9f96cb90da5dbc758b01813f2f6f1aee24c1ab",
+    "notice": "Apache 2.0 允许符合条件的商业使用；使用与再分发须遵守原协议，保留许可证、版权及适用的 NOTICE，并标明修改。"
+  },
+  {
+    "id": "qwen",
+    "repo": "Qwen/Qwen3-VL-Embedding-2B",
+    "revision": "9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda",
+    "key": "qwenModel",
+    "size": "约 4.3 GB",
+    "environment": "embedding",
+    "title": "Qwen · 多模态检索",
+    "license": "Apache-2.0.txt",
+    "licenseSHA256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "licenseURL": "https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B/tree/9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda",
+    "notice": "Apache 2.0 允许符合条件的商业使用；使用与再分发须遵守原协议，保留许可证、版权及适用的 NOTICE，并标明修改。"
+  },
+  {
+    "id": "art",
+    "repo": "q-future/Q-ReAlign-Mini-0.8B",
+    "revision": "fe1f45a7574c9e9d908875af9f7e90cb946aa19f",
+    "key": "artModel",
+    "size": "约 2.3 GB",
+    "environment": "scoring",
+    "title": "Q-ReAlign · 艺术与质量评分",
+    "license": "Apache-2.0.txt",
+    "licenseSHA256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "licenseURL": "https://huggingface.co/q-future/Q-ReAlign-Mini-0.8B/tree/fe1f45a7574c9e9d908875af9f7e90cb946aa19f",
+    "notice": "Apache 2.0 允许符合条件的商业使用；使用与再分发须遵守原协议，保留许可证、版权及适用的 NOTICE，并标明修改。"
+  },
+  {
+    "id": "jarvis",
+    "repo": "JarvisArt/JarvisArt-1208",
+    "revision": "be67846a4be4780fde86473ce19fc3f3af77e4d4",
+    "key": "jarvisModel",
+    "size": "约 16.6 GB",
+    "environment": "embedding",
+    "title": "JarvisArt · AI 调色",
+    "license": "JarvisArt-LICENSE.txt",
+    "licenseSHA256": "7c96162d30ede1992ebdc5235f77891ae1e81850943e3c855246c405c316d46e",
+    "licenseURL": "https://github.com/LYL1015/JarvisArt/blob/main/LICENSE",
+    "notice": "仅限非商业、非生产用途；不得用于商业活动、生产环境、军事、监控或生物识别等许可证禁止的用途。商业使用须另向权利人取得授权。输出的权利与限制另见原协议第 2(d) 条。"
+  }
+]

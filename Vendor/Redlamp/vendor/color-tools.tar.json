@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/pdcgomes/redlamp",
+  "tag": "v0.3.3-alpha",
+  "source": "https://github.com/pdcgomes/redlamp/tree/v0.3.3-alpha",
+  "license": "MPL-2.0; see ../LICENSE",
+  "sha256": "e38440b50cb65cc1bcf1f231b5f233a710745c4569434dc60d6684d47689ea43",
+  "frameworks": [
+    "Cmlx",
+    "MLX",
+    "RedlampBench",
+    "RedlampColor",
+    "RedlampDocument",
+    "RedlampEngine",
+    "RedlampEngineAPI",
+    "RedlampGenerative",
+    "RedlampKernels",
+    "RedlampLibrary",
+    "RedlampMasking",
+    "RedlampRecipes",
+    "RedlampServices",
+    "cLogSupport"
+  ],
+  "purpose": "Unmodified CLI used only for XMP recipe import; no model weights."
+}

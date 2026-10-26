@@ -1,0 +1,12 @@
+torch>=2.6,<3
+transformers>=4.51,<5
+pillow
+sentencepiece
+protobuf
+huggingface-hub
+
+# Required by Qwen3-VL AutoProcessor, even for still images.
+torchvision>=0.21,<1
+
+# Runtime prediction only; conversion uses its own pinned environment.
+coremltools==9.0

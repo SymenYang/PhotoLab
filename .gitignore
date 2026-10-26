@@ -1,0 +1,27 @@
+.build/
+build/
+.DS_Store
+.ai-runtime/
+.ai-model*/
+__pycache__/
+
+/research/
+/checkpoints/
+/test_photo/
+/.local/
+/.agents/
+/.codex/
+/.aws/
+.env
+.env.*
+!.env.example
+*.pyc
+*.sqlite
+*.sqlite-*
+*.photolab
+/Resources/AppIcon.icns
+/Resources/AppIcon.iconset/
+# Machine-specific network diagnostics and captured output
+/network_*
+/nas_layer_benchmark*
+/smb_*

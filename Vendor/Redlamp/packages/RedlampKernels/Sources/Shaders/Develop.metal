@@ -1,0 +1,1489 @@
+#include "RedlampShaderTypes.h"
+
+// MARK: - Color helpers
+
+constant float3 kRec2020Luma = float3(0.2627f, 0.6780f, 0.0593f);
+constant float kMiddleGrey = 0.18f;
+constant float kBandHues[8] = { 25.0f, 55.0f, 100.0f, 140.0f, 195.0f, 255.0f, 300.0f, 340.0f };
+
+static inline float3 mul3(float4 r0, float4 r1, float4 r2, float3 v) {
+    return float3(dot(r0.xyz, v), dot(r1.xyz, v), dot(r2.xyz, v));
+}
+
+static inline float signedCbrt(float x) { return sign(x) * pow(abs(x), 1.0f / 3.0f); }
+
+// Björn Ottosson's OKLab, from linear Rec.2020 (his linear-sRGB matrices composed with
+// Rec.2020 -> sRGB, so values match the sRGB-based OKLab in RedlampColor).
+static inline float3 rec2020ToOKLab(float3 c) {
+    float l = 0.6167557872f * c.r + 0.3601983994f * c.g + 0.0230458134f * c.b;
+    float m = 0.2651330640f * c.r + 0.6358393641f * c.g + 0.0990275718f * c.b;
+    float s = 0.1001026342f * c.r + 0.2039065194f * c.g + 0.6959908464f * c.b;
+    l = signedCbrt(l); m = signedCbrt(m); s = signedCbrt(s);
+    return float3(
+        0.2104542553f * l + 0.7936177850f * m - 0.0040720468f * s,
+        1.9779984951f * l - 2.4285922050f * m + 0.4505937099f * s,
+        0.0259040371f * l + 0.7827717662f * m - 0.8086757660f * s);
+}
+
+static inline float3 okLabToRec2020(float3 lab) {
+    float l = lab.x + 0.3963377774f * lab.y + 0.2158037573f * lab.z;
+    float m = lab.x - 0.1055613458f * lab.y - 0.0638541728f * lab.z;
+    float s = lab.x - 0.0894841775f * lab.y - 1.2914855480f * lab.z;
+    l = l * l * l; m = m * m * m; s = s * s * s;
+    return float3(
+        2.1399067357f * l - 1.2463895088f * m + 0.1064827730f * s,
+        -0.8847358625f * l + 2.1632309821f * m - 0.2784951194f * s,
+        -0.0485737580f * l - 0.4545031429f * m + 1.5030769009f * s);
+}
+
+static inline float srgbEncode(float x) {
+    return x <= 0.0031308f ? 12.92f * x : 1.055f * pow(x, 1.0f / 2.4f) - 0.055f;
+}
+
+static inline float srgbDecode(float x) {
+    return x <= 0.04045f ? x / 12.92f : pow((x + 0.055f) / 1.055f, 2.4f);
+}
+
+static inline float3 srgbEncode3(float3 c) { return float3(srgbEncode(c.r), srgbEncode(c.g), srgbEncode(c.b)); }
+static inline float3 srgbDecode3(float3 c) { return float3(srgbDecode(c.r), srgbDecode(c.g), srgbDecode(c.b)); }
+
+// DNG camera profiles' HSV (dng_sdk's DNG_RGBtoHSV): hue in 0...6, value the largest channel.
+static inline float3 dngHSV(float3 c) {
+    float v = max3(c.r, c.g, c.b);
+    float gap = v - min3(c.r, c.g, c.b);
+    if (gap <= 0.0f) return float3(0.0f, 0.0f, v);
+    float h;
+    if (c.r == v) {
+        h = (c.g - c.b) / gap;
+        if (h < 0.0f) h += 6.0f;
+    } else if (c.g == v) {
+        h = 2.0f + (c.b - c.r) / gap;
+    } else {
+        h = 4.0f + (c.r - c.g) / gap;
+    }
+    return float3(h, gap / v, v);
+}
+
+static inline float3 dngRGB(float3 hsv) {
+    float h = hsv.x, s = hsv.y, v = hsv.z;
+    if (s <= 0.0f) return float3(v);
+    if (h < 0.0f) h += 6.0f;
+    if (h >= 6.0f) h -= 6.0f;
+    int i = min(int(h), 5);
+    float f = h - float(i);
+    float p = v * (1.0f - s), q = v * (1.0f - s * f), t = v * (1.0f - s * (1.0f - f));
+    switch (i) {
+        case 0: return float3(v, t, p);
+        case 1: return float3(q, v, p);
+        case 2: return float3(p, v, t);
+        case 3: return float3(p, q, v);
+        case 4: return float3(t, p, v);
+        default: return float3(v, p, q);
+    }
+}
+
+// A HueSatMap's hue shift (degrees), saturation scale and value scale at `hsv` (dng_sdk's
+// RefBaselineHueSatMap): bilinear in hue, which wraps, and saturation; linear in value for 3D
+// maps. The texture holds saturation across, hue down and value in depth.
+static inline float3 hueSatEntry(texture3d<float, access::read> map, float3 hsv, float encodedValue) {
+    int hues = int(map.get_height()), saturations = int(map.get_width()), values = int(map.get_depth());
+    float hScaled = hues < 2 ? 0.0f : hsv.x * float(hues) / 6.0f;
+    float sScaled = hsv.y * float(saturations - 1);
+    int h0 = int(hScaled);
+    int s0 = min(int(sScaled), saturations - 2);
+    int h1 = h0 + 1;
+    if (h0 >= hues - 1) {
+        h0 = hues - 1;
+        h1 = 0;
+    }
+    float hf = hScaled - float(h0), sf = sScaled - float(s0);
+    int v0 = 0;
+    float vf = 0.0f;
+    if (values > 1) {
+        float vScaled = clamp(encodedValue, 0.0f, 1.0f) * float(values - 1);
+        v0 = min(int(vScaled), values - 2);
+        vf = vScaled - float(v0);
+    }
+    float3 result = 0.0f;
+    for (int dv = 0; dv <= (values > 1 ? 1 : 0); dv++) {
+        uint v = uint(v0 + dv);
+        float3 low = mix(map.read(uint3(s0, h0, v)).xyz, map.read(uint3(s0, h1, v)).xyz, hf);
+        float3 high = mix(map.read(uint3(s0 + 1, h0, v)).xyz, map.read(uint3(s0 + 1, h1, v)).xyz, hf);
+        result += mix(low, high, sf) * (values > 1 ? (dv == 0 ? 1.0f - vf : vf) : 1.0f);
+    }
+    return result;
+}
+
+// The profile's ProfileGainTableMap (DNG 1.6 and 1.7): the gain for this pixel's mix of channels
+// in linear ProPhoto (after BaselineExposure), from the four tables around its position in the
+// raw image, all in one trilinear sample. Apple ProRAW's local tone mapping.
+static inline float gainTableAt(float3 scene, float2 sourceUV, texture3d<float, access::sample> table,
+                                constant DevelopParams &p) {
+    float3 pro = mul3(p.toProPhoto0, p.toProPhoto1, p.toProPhoto2, scene) * p.gainTable.z;
+    float input = dot(p.gainTableWeights, float4(pro, min3(pro.r, pro.g, pro.b))) + p.gainTable.w * max3(pro.r, pro.g, pro.b);
+    input = pow(clamp(input, 0.0f, 1.0f), p.gainTable.y);
+    float3 size = float3(table.get_width(), table.get_height(), table.get_depth());
+    float2 cell = (sourceUV - p.gainTableGrid.xy) / p.gainTableGrid.zw;
+    float3 coordinate = (float3(min(input * size.x, size.x - 1.0f), cell.x, cell.y) + 0.5f) / size;
+    constexpr sampler tableSampler(coord::normalized, filter::linear, address::clamp_to_edge);
+    return max(table.sample(tableSampler, coordinate).r, 0.0f);
+}
+
+// How far a hue (degrees) lies inside the band from `from` to `to`, going up and wrapping at 360,
+// with 8° shoulders.
+static inline float hueBand(float hue, float from, float to) {
+    float width = fmod(to - from + 720.0f, 360.0f);
+    float d = fmod(hue - from + 720.0f, 360.0f);
+    float inside = d <= width ? 1.0f : 0.0f;
+    float below = 1.0f - smoothstep(0.0f, 8.0f, 360.0f - d);
+    float above = 1.0f - smoothstep(0.0f, 8.0f, d - width);
+    return max(inside, max(below, above));
+}
+
+// Lightroom's Defringe: purple or green colour beside a strong edge (a stop and more of contrast
+// within two texels) loses its colour, so axial fringes that no scale can realign go grey.
+static inline float3 defringe(float3 scene, texture2d<float, access::sample> source, float2 sourceUV,
+                              float2 amounts, constant DevelopParams &p) {
+    constexpr sampler pointSampler(coord::normalized, filter::linear, mip_filter::nearest, address::clamp_to_edge);
+    uint mip = uint(max(p.geometry.y, 0.0f));
+    float2 texel = 2.0f / float2(source.get_width(mip), source.get_height(mip));
+    float lo = 1e9f, hi = 0.0f;
+    for (int i = 0; i < 5; i++) {
+        float2 offset = i == 0 ? float2(0.0f) : float2(i == 1 ? 1.0f : i == 2 ? -1.0f : 0.0f, i == 3 ? 1.0f : i == 4 ? -1.0f : 0.0f);
+        float3 c = source.sample(pointSampler, sourceUV + offset * texel, level(float(mip))).rgb;
+        float l = max(c.r + c.g + c.b, 1e-6f);
+        lo = min(lo, l);
+        hi = max(hi, l);
+    }
+    float edge = smoothstep(1.0f, 2.0f, log2(hi / lo));
+    if (edge <= 0.0f) return scene;
+    float3 lab = rec2020ToOKLab(max(scene, 0.0f));
+    float chroma = length(lab.yz);
+    if (chroma < 1e-5f || lab.x < 1e-5f) return scene;
+    float hue = fmod(atan2(lab.z, lab.y) * 57.2957795f + 360.0f, 360.0f);
+    float saturated = smoothstep(0.05f, 0.15f, chroma / lab.x);
+    float amount = amounts.x * hueBand(hue, p.defringeHue.x, p.defringeHue.y)
+        + amounts.y * hueBand(hue, p.defringeHue.z, p.defringeHue.w);
+    float weight = clamp(amount * edge * saturated, 0.0f, 1.0f);
+    return mix(scene, float3(dot(scene, kRec2020Luma)), weight);
+}
+
+// A mask's Moiré: colour averaged over a 3x3 neighbourhood about three texels apart, at the
+// pixel's own luminance, so the coloured bands that fine repeating patterns alias into go, and
+// detail stays.
+static inline float3 removeMoire(float3 camera, texture2d<float, access::sample> source, float2 sourceUV,
+                                 float amount, constant DevelopParams &p) {
+    constexpr sampler areaSampler(coord::normalized, filter::linear, mip_filter::nearest, address::clamp_to_edge);
+    uint mip = uint(max(p.geometry.y, 0.0f));
+    float2 texel = 3.0f / float2(source.get_width(mip), source.get_height(mip));
+    float3 total = 0.0f;
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            total += source.sample(areaSampler, sourceUV + float2(dx, dy) * texel, level(float(mip))).rgb;
+        }
+    }
+    float3 average = total / 9.0f;
+    // Luminance in camera RGB: Rec. 2020's weights through the camera matrix.
+    float3 weights = p.camToWork0.xyz * kRec2020Luma.x + p.camToWork1.xyz * kRec2020Luma.y
+        + p.camToWork2.xyz * kRec2020Luma.z;
+    float3 smoothed = average * (dot(camera, weights) / max(dot(average, weights), 1e-6f));
+    return mix(camera, smoothed, clamp(amount, 0.0f, 1.0f));
+}
+
+// The camera profile's colour correction, in linear ProPhoto as the DNG specification has it:
+// hue shifted, saturation (at most 1) and value scaled. Unlike dng_sdk, light above white keeps
+// its headroom, and channels below zero pass through, so an identity map changes nothing.
+static inline float3 applyHueSatMap(float3 scene, texture3d<float, access::read> cool,
+                                    texture3d<float, access::read> warm, constant DevelopParams &p) {
+    float3 pro = mul3(p.toProPhoto0, p.toProPhoto1, p.toProPhoto2, scene);
+    float3 negative = min(pro, 0.0f);
+    float3 hsv = dngHSV(max(pro, 0.0f));
+    bool srgb = p.hueSat.z > 0.5f;
+    float encoded = srgb ? srgbEncode(hsv.z) : hsv.z;
+    float3 entry = mix(hueSatEntry(warm, hsv, encoded), hueSatEntry(cool, hsv, encoded), p.hueSat.y);
+    hsv.x += entry.x * (6.0f / 360.0f);
+    hsv.y = min(hsv.y * entry.y, 1.0f);
+    hsv.z = srgb ? srgbDecode(max(encoded * entry.z, 0.0f)) : max(hsv.z * entry.z, 0.0f);
+    return mul3(p.fromProPhoto0, p.fromProPhoto1, p.fromProPhoto2, dngRGB(hsv) + negative);
+}
+
+// Filmic curve (Narkowicz's ACES fit).
+static inline float filmic(float x) {
+    return (x * (2.51f * x + 0.03f)) / (x * (2.43f * x + 0.59f) + 0.14f);
+}
+
+// Scene -> display tone curve. Below 0.8 display (about +1.6 EV above middle grey) it is the
+// filmic curve normalised so scene 1.0 maps to 1. Above that, a shoulder in log2 space that
+// joins with matching slope and reaches white smoothly at +4 EV, so highlights roll off over
+// 1.5 EV beyond the old clip point while sensor-saturated areas still render white.
+constant float kShoulderStart = 0.54358851f;    // scene value where the curve reaches 0.8
+constant float kShoulderStartY = 0.8f;
+constant float kShoulderWidthEV = 2.40548194f;  // join to white (0.18 * 2^4)
+constant float kShoulderPower = 3.25537943f;    // matches the filmic slope at the join
+constant float kFilmicAtOne = 0.80379747f;
+
+static inline float toneCurveChannel(float x) {
+    if (x <= kShoulderStart) return filmic(x) / kFilmicAtOne;
+    float u = min(log2(x / kShoulderStart) / kShoulderWidthEV, 1.0f);
+    return 1.0f - (1.0f - kShoulderStartY) * pow(1.0f - u, kShoulderPower);
+}
+
+// Per-channel curve, with each channel's position between the smallest and largest kept, so
+// hue survives the curve and bright saturated colors head towards white without shifting.
+static inline float3 toneCurve(float3 x) {
+    float3 y = float3(toneCurveChannel(x.r), toneCurveChannel(x.g), toneCurveChannel(x.b));
+    float lo = min3(x.r, x.g, x.b);
+    float hi = max3(x.r, x.g, x.b);
+    if (hi - lo < 1e-7f) return y;
+    float yLo = min3(y.r, y.g, y.b);
+    float yHi = max3(y.r, y.g, y.b);
+    return yLo + (yHi - yLo) * (x - lo) / (hi - lo);
+}
+
+// The tone curve's exact inverse, for input that is already display-referred (a JPEG): the
+// filmic part is a quadratic in x, the shoulder a power in log2.
+static inline float inverseToneCurveChannel(float y) {
+    y = clamp(y, 0.0f, 1.0f);
+    if (y <= kShoulderStartY) {
+        float t = y * kFilmicAtOne;
+        float a = 2.43f * t - 2.51f, b = 0.59f * t - 0.03f, c = 0.14f * t;
+        return max((-b - sqrt(max(b * b - 4.0f * a * c, 0.0f))) / (2.0f * a), 0.0f);
+    }
+    float u = 1.0f - pow((1.0f - y) / (1.0f - kShoulderStartY), 1.0f / kShoulderPower);
+    return kShoulderStart * exp2(u * kShoulderWidthEV);
+}
+
+static inline float3 inverseToneCurve(float3 y) {
+    float3 x = float3(inverseToneCurveChannel(y.r), inverseToneCurveChannel(y.g), inverseToneCurveChannel(y.b));
+    float lo = min3(y.r, y.g, y.b);
+    float hi = max3(y.r, y.g, y.b);
+    if (hi - lo < 1e-7f) return x;
+    float xLo = inverseToneCurveChannel(lo);
+    float xHi = inverseToneCurveChannel(hi);
+    return xLo + (xHi - xLo) * (y - lo) / (hi - lo);
+}
+
+// Fits a linear Rec.2020 color into the output gamut: channels are clipped to [0, 1], then each
+// channel's position between the smallest and largest is restored. That keeps hue and nearly all
+// saturation; mapping at constant OKLab lightness instead visibly dulls vivid colors.
+static inline float3 gamutMap(float3 rec2020, constant DevelopParams &p) {
+    float3 rgb = mul3(p.displayToOutput0, p.displayToOutput1, p.displayToOutput2, rec2020);
+    float3 clipped = clamp(rgb, 0.0f, 1.0f);
+    float lo = min3(rgb.r, rgb.g, rgb.b);
+    float hi = max3(rgb.r, rgb.g, rgb.b);
+    if (hi - lo < 1e-7f) return clipped;
+    float clippedLo = min3(clipped.r, clipped.g, clipped.b);
+    float clippedHi = max3(clipped.r, clipped.g, clipped.b);
+    return clippedLo + (clippedHi - clippedLo) * (rgb - lo) / (hi - lo);
+}
+
+// The most chroma an OKLab lightness and hue can have inside the output gamut (bisection).
+static inline float maxChroma(float lightness, float hueRadians, constant DevelopParams &p) {
+    float2 direction = float2(cos(hueRadians), sin(hueRadians));
+    float inside = 0.0f;
+    float outside = 0.5f;
+    for (int i = 0; i < 10; i++) {
+        float c = 0.5f * (inside + outside);
+        float3 rgb = mul3(p.displayToOutput0, p.displayToOutput1, p.displayToOutput2,
+                          okLabToRec2020(float3(lightness, c * direction)));
+        bool fits = all(rgb >= -1e-4f) && all(rgb <= 1.0001f);
+        inside = fits ? c : inside;
+        outside = fits ? outside : c;
+    }
+    return inside;
+}
+
+// Gamut-relative saturation: a boost from `chroma` towards `target` approaches the gamut
+// boundary instead of passing it, so already vivid colours don't clip flat. Small boosts are
+// unchanged; reductions pass through.
+static inline float boostChroma(float chroma, float target, float lightness, float hueRadians,
+                                constant DevelopParams &p) {
+    if (target <= chroma) return target;
+    float headroom = maxChroma(lightness, hueRadians, p) - chroma;
+    if (headroom <= 1e-5f) return chroma;
+    return chroma + headroom * (1.0f - exp(-(target - chroma) / headroom));
+}
+
+static inline float hueDistance(float a, float b) {
+    float d = fmod(abs(a - b), 360.0f);
+    return d > 180.0f ? 360.0f - d : d;
+}
+
+static inline float hueBump(float hue, float centre, float width) {
+    float d = hueDistance(hue, centre) / width;
+    return d >= 1.0f ? 0.0f : 0.5f + 0.5f * cos(d * M_PI_F);
+}
+
+// Eight on the edit and eight on each of up to 16 masks.
+constant int kMaxPointColorSwatches = 136;
+
+// How fully a Point Color swatch selects a colour: a trapezoid on each axis around its own colour
+// (hue on the circle, chroma in stops, lightness), times the colourfulness the Color Mixer uses, since
+// hue means little near grey.
+static inline float pointColorWeight(PointColorGPU s, float lightness, float chroma, float hue) {
+    float3 distance = float3(
+        hueDistance(hue, s.color.z),
+        abs(log2(max(chroma, 1e-4f) / max(s.color.y, 0.02f))),
+        abs(lightness - s.color.x));
+    float3 width = s.range.xyz;
+    float3 weight = 1.0f - smoothstep(width * (1.0f - s.range.w), width, distance);
+    return weight.x * weight.y * weight.z * smoothstep(0.0f, 0.04f, chroma);
+}
+
+// Entries in each of the Tone Curve's tables (ToneCurveMath.lutSize).
+constant uint kToneLUTSize = 1024;
+
+static inline float sampleLUT(constant float *lut, float x) {
+    float position = clamp(x, 0.0f, 1.0f) * float(kToneLUTSize - 1);
+    uint i = uint(position);
+    uint j = min(i + 1, kToneLUTSize - 1);
+    return mix(lut[i], lut[j], position - float(i));
+}
+
+// MARK: - Base Look tables
+
+// SceneLogEncoding in RedlampEngineAPI: stops from middle grey, -10...+6.5 EV to 0...1.
+constant float kSceneLogMinimumEV = -10.0f;
+constant float kSceneLogRangeEV = 16.5f;
+
+static inline float3 sceneLogEncode3(float3 linear) {
+    float3 ev = log2(max(linear, 1e-9f) / kMiddleGrey);
+    return clamp((ev - kSceneLogMinimumEV) / kSceneLogRangeEV, 0.0f, 1.0f);
+}
+
+static inline float3 lookTableEntry(texture3d<half, access::read> table, int3 p) {
+    return float3(table.read(uint3(p)).rgb);
+}
+
+// Tetrahedral interpolation of a size³ table (matches LookTable.sample on the CPU).
+static inline float3 sampleLookTable(texture3d<half, access::read> table, float3 c, float size) {
+    float n = size - 1.0f;
+    float3 p = clamp(c, 0.0f, 1.0f) * n;
+    int3 b = min(int3(p), int3(int(n) - 1));
+    float3 f = p - float3(b);
+    float3 c000 = lookTableEntry(table, b);
+    float3 c111 = lookTableEntry(table, b + int3(1, 1, 1));
+    if (f.x > f.y) {
+        if (f.y > f.z) {
+            float3 c100 = lookTableEntry(table, b + int3(1, 0, 0)), c110 = lookTableEntry(table, b + int3(1, 1, 0));
+            return c000 + f.x * (c100 - c000) + f.y * (c110 - c100) + f.z * (c111 - c110);
+        } else if (f.x > f.z) {
+            float3 c100 = lookTableEntry(table, b + int3(1, 0, 0)), c101 = lookTableEntry(table, b + int3(1, 0, 1));
+            return c000 + f.x * (c100 - c000) + f.z * (c101 - c100) + f.y * (c111 - c101);
+        } else {
+            float3 c001 = lookTableEntry(table, b + int3(0, 0, 1)), c101 = lookTableEntry(table, b + int3(1, 0, 1));
+            return c000 + f.z * (c001 - c000) + f.x * (c101 - c001) + f.y * (c111 - c101);
+        }
+    }
+    if (f.z > f.y) {
+        float3 c001 = lookTableEntry(table, b + int3(0, 0, 1)), c011 = lookTableEntry(table, b + int3(0, 1, 1));
+        return c000 + f.z * (c001 - c000) + f.y * (c011 - c001) + f.x * (c111 - c011);
+    } else if (f.z > f.x) {
+        float3 c010 = lookTableEntry(table, b + int3(0, 1, 0)), c011 = lookTableEntry(table, b + int3(0, 1, 1));
+        return c000 + f.y * (c010 - c000) + f.z * (c011 - c010) + f.x * (c111 - c011);
+    }
+    float3 c010 = lookTableEntry(table, b + int3(0, 1, 0)), c110 = lookTableEntry(table, b + int3(1, 1, 0));
+    return c000 + f.y * (c010 - c000) + f.x * (c110 - c010) + f.z * (c111 - c110);
+}
+
+static inline float hash(uint2 p, uint seed) {
+    uint n = p.x * 1973u + p.y * 9277u + seed * 26699u;
+    n = (n << 13u) ^ n;
+    n = n * (n * n * 15731u + 789221u) + 1376312589u;
+    return float(n & 0x7fffffffu) / float(0x7fffffff);
+}
+
+static inline float valueNoise(float2 p, uint seed) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+    f = f * f * (3.0f - 2.0f * f);
+    uint2 c = uint2(int2(i) + 100000);
+    float a = hash(c, seed);
+    float b = hash(c + uint2(1, 0), seed);
+    float cc = hash(c + uint2(0, 1), seed);
+    float d = hash(c + uint2(1, 1), seed);
+    return mix(mix(a, b, f.x), mix(cc, d, f.x), f.y);
+}
+
+// One channel of grain: a coarse and a fine octave of value noise, `size` full-resolution
+// pixels across. With a `footprint` (full-resolution pixels per output pixel, 0 at full
+// resolution or above) octaves finer than a pixel are sampled at the pixel and attenuated by
+// how many grains it averages.
+static inline float grainNoise(float2 position, float size, float footprint, float roughness, uint coarseSeed, uint fineSeed) {
+    float fineSize = size * 0.5f;
+    float coarse = (valueNoise(position / max(size, footprint), coarseSeed) - 0.5f)
+        * (footprint > 0.0f ? min(1.0f, size / footprint) : 1.0f);
+    float fine = (valueNoise(position / max(fineSize, footprint), fineSeed) - 0.5f)
+        * (footprint > 0.0f ? min(1.0f, fineSize / footprint) : 1.0f);
+    return mix(coarse, fine, roughness);
+}
+
+// MARK: - Mood effects
+
+// Two or three soft, coloured glows from just outside the frame's edges (mostly the sides, where
+// light gets in at a camera's film gate), screened over the image. `mood.y` turns them from cool
+// (-1) to warm (+1); `mood.z` picks a different arrangement.
+static inline float3 lightLeak(float3 encoded, float2 q, float aspect, float4 mood) {
+    uint seed = uint(mood.z * 997.0f) + 3u;
+    float3 leak = 0.0f;
+    for (uint i = 0; i < 3; i++) {
+        if (i == 2 && hash(uint2(i, 9u), seed) < 0.5f) break;
+        float side = hash(uint2(i, 1u), seed);
+        float along = mix(0.1f, 0.9f, hash(uint2(i, 2u), seed));
+        float size = mix(0.3f, 0.75f, hash(uint2(i, 3u), seed));
+        float2 centre, scale;
+        if (side < 0.42f) { centre = float2(-0.1f, along); scale = float2(size * 0.55f, size); }
+        else if (side < 0.84f) { centre = float2(aspect + 0.1f, along); scale = float2(size * 0.55f, size); }
+        else if (side < 0.92f) { centre = float2(along * aspect, -0.1f); scale = float2(size, size * 0.55f); }
+        else { centre = float2(along * aspect, 1.1f); scale = float2(size, size * 0.55f); }
+        float2 d = (q - centre) / scale;
+        float w = exp(-2.0f * dot(d, d));
+        float3 warm = mix(float3(1.0f, 0.42f, 0.08f), float3(1.0f, 0.15f, 0.2f), hash(uint2(i, 4u), seed));
+        warm = mix(warm, float3(1.0f, 0.82f, 0.32f), 0.35f * hash(uint2(i, 5u), seed));
+        float3 cool = mix(float3(0.25f, 0.55f, 1.0f), float3(0.6f, 0.3f, 1.0f), hash(uint2(i, 4u), seed));
+        leak += mix(cool, warm, 0.5f + 0.5f * mood.y) * w;
+    }
+    leak = min(leak * mood.x * 1.2f, 1.0f);
+    return 1.0f - (1.0f - encoded) * (1.0f - leak);
+}
+
+// Dust: at most one speck per cell of 60 frame pixels, mostly small and dark (dust on a scanned
+// negative or slide), a few bright. A speck smaller than an output pixel fades by its share of it.
+static inline float3 dust(float3 encoded, float2 position, float framePixel, float footprint, float amount) {
+    float cell = 60.0f * framePixel;
+    int2 c = int2(floor(position / cell));
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            int2 at = c + int2(dx, dy);
+            uint2 key = uint2(at + 100000);
+            if (hash(key, 41u) >= 0.06f * amount) continue;
+            float2 centre = (float2(at) + float2(hash(key, 43u), hash(key, 47u))) * cell;
+            float radius = mix(1.2f, 9.0f, pow(hash(key, 53u), 2.5f)) * framePixel;
+            float2 offset = position - centre;
+            float stretch = mix(1.0f, 2.5f, hash(key, 61u));
+            float angle = hash(key, 67u) * 6.2831853f;
+            float2 axis = float2(cos(angle), sin(angle));
+            float along = dot(offset, axis) / stretch;
+            float across = dot(offset, float2(-axis.y, axis.x));
+            float distance = length(float2(along, across));
+            float soft = max(radius * 0.35f, footprint * 0.5f);
+            float coverage = (1.0f - smoothstep(radius - soft, radius + soft, distance))
+                * min(1.0f, radius * radius / (footprint * footprint));
+            float3 speck = hash(key, 59u) < 0.75f ? float3(0.04f) : float3(0.96f);
+            encoded = mix(encoded, speck, coverage * 0.85f);
+        }
+    }
+    return encoded;
+}
+
+// Scratches: fine vertical lines down the frame, as a film's travel through a camera or
+// projector leaves them, flickering in strength along their length.
+static inline float3 scratches(float3 encoded, float2 position, float2 fullSize, float framePixel, float footprint, float amount) {
+    float bucket = 45.0f * framePixel;
+    int b = int(floor(position.x / bucket));
+    for (int db = -1; db <= 1; db++) {
+        uint2 key = uint2(uint(b + db + 100000), 7u);
+        if (hash(key, 71u) >= 0.05f * amount) continue;
+        float x = (float(b + db) + hash(key, 73u)) * bucket;
+        float width = mix(1.0f, 3.0f, hash(key, 79u)) * framePixel;
+        float start = hash(key, 83u) * fullSize.y * 0.7f;
+        float extent = mix(0.3f, 1.0f, hash(key, 89u)) * fullSize.y;
+        float inside = smoothstep(start, start + 40.0f * framePixel, position.y)
+            * (1.0f - smoothstep(start + extent - 40.0f * framePixel, start + extent, position.y));
+        float soft = max(width * 0.5f, footprint * 0.5f);
+        float coverage = (1.0f - smoothstep(width - soft, width + soft, abs(position.x - x)))
+            * min(1.0f, width / footprint) * inside;
+        float flicker = 0.45f + 0.55f * valueNoise(float2(x, position.y / (180.0f * framePixel)), 97u);
+        float3 line = hash(key, 101u) < 0.6f ? float3(0.95f) : float3(0.08f);
+        encoded = mix(encoded, line, coverage * flicker * 0.7f);
+    }
+    return encoded;
+}
+
+// A border over the photo's edges (FrameStyle): a keyline, a white print border, a 35 mm film
+// rebate with its sprocket holes, or a slide mount. `q` is in frame heights; `pixel` is an output
+// pixel in the same units, for antialiasing.
+static inline float3 frameBorder(float3 encoded, float2 q, float aspect, int style, float size, float pixel) {
+    float toEdge = min(min(q.x, aspect - q.x), min(q.y, 1.0f - q.y));
+    if (style == 1) {
+        float width = 0.006f * size;
+        return mix(encoded, float3(0.02f), 1.0f - smoothstep(width - pixel, width + pixel, toEdge));
+    }
+    if (style == 2) {
+        float width = 0.035f * size;
+        float paper = 1.0f - smoothstep(width - pixel, width + pixel, toEdge);
+        return mix(encoded, float3(0.96f, 0.955f, 0.94f), paper);
+    }
+    if (style == 3) {
+        // The rebate runs along the long sides with the sprocket holes in it (a 35 mm frame is
+        // eight perforations long), with a thin black edge on the short sides.
+        bool landscape = aspect >= 1.0f;
+        float2 r = landscape ? q : float2(q.y * aspect, q.x / aspect);
+        float span = landscape ? aspect : 1.0f / aspect;
+        float band = 0.13f * size, side = 0.02f * size;
+        float alongEdge = min(r.y, 1.0f - r.y);
+        float black = max(1.0f - smoothstep(band - pixel, band + pixel, alongEdge),
+                          1.0f - smoothstep(side - pixel, side + pixel, min(r.x, span - r.x)));
+        float pitch = span / 8.0f;
+        float2 hole = float2(fmod(r.x + pitch * 0.5f, pitch) - pitch * 0.5f, alongEdge - band * 0.5f);
+        float2 halfSize = float2(pitch * 0.29f, band * 0.3f);
+        float2 outside = abs(hole) - halfSize + 0.01f * size;
+        float holeDistance = length(max(outside, 0.0f)) + min(max(outside.x, outside.y), 0.0f) - 0.01f * size;
+        float lit = (1.0f - smoothstep(-pixel, pixel, holeDistance)) * step(alongEdge, band);
+        float3 rebate = mix(float3(0.015f, 0.012f, 0.01f), float3(0.98f, 0.93f, 0.84f), lit);
+        return mix(encoded, rebate, black);
+    }
+    if (style == 4) {
+        float inset = 0.06f * size, radius = 0.035f * size;
+        float2 halfWindow = float2(aspect * 0.5f - inset, 0.5f - inset);
+        float2 outside = abs(q - float2(aspect * 0.5f, 0.5f)) - halfWindow + radius;
+        float distance = length(max(outside, 0.0f)) + min(max(outside.x, outside.y), 0.0f) - radius;
+        float mount = smoothstep(-pixel, pixel, distance);
+        float bevel = smoothstep(0.0f, 0.012f * size, distance);
+        return mix(encoded, mix(float3(0.8f, 0.79f, 0.77f), float3(0.93f, 0.925f, 0.91f), bevel), mount);
+    }
+    return encoded;
+}
+
+// MARK: - Border around the photo
+
+// Edge print's dot-matrix face: 5 × 7 dots per glyph, a row per entry, the leftmost dot in bit 4.
+// Glyphs by BorderGlyphs' codes: space, 0 to 9, A to Z, an arrow, a dash and a full stop.
+constant uchar kBorderGlyphs[40][7] = {
+    {0, 0, 0, 0, 0, 0, 0},
+    {0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110},
+    {0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110},
+    {0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111},
+    {0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110},
+    {0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010},
+    {0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110},
+    {0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110},
+    {0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000},
+    {0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110},
+    {0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100},
+    {0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001},
+    {0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110},
+    {0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110},
+    {0b11100, 0b10010, 0b10001, 0b10001, 0b10001, 0b10010, 0b11100},
+    {0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111},
+    {0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000},
+    {0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111},
+    {0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001},
+    {0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110},
+    {0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100},
+    {0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001},
+    {0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111},
+    {0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001},
+    {0b10001, 0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001},
+    {0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110},
+    {0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000},
+    {0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101},
+    {0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001},
+    {0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110},
+    {0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100},
+    {0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110},
+    {0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100},
+    {0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b10101, 0b01010},
+    {0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001},
+    {0b10001, 0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100},
+    {0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111},
+    {0b01000, 0b01100, 0b01110, 0b01111, 0b01110, 0b01100, 0b01000},
+    {0, 0, 0, 0b11111, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0b01100, 0b01100},
+};
+
+static inline int borderGlyph(constant BorderParams &b, int index) {
+    float4 groups[8] = {b.text0, b.text1, b.text2, b.text3, b.text4, b.text5, b.text6, b.text7};
+    return int(groups[index / 4][index % 4] + 0.5f);
+}
+
+// Coverage of the edge print at `s` along the film and `t` across it, from the text's foot: round
+// dots of a 5 × 7 face, `dot` apart, each glyph six dots wide.
+static inline float edgePrint(constant BorderParams &b, float s, float t, float dot, float pixel) {
+    int count = int(b.canvas.z + 0.5f);
+    if (s < 0.0f || t < 0.0f || t >= 7.0f * dot) return 0.0f;
+    int cell = int(floor(s / (6.0f * dot)));
+    if (cell >= count) return 0.0f;
+    float local = s - float(cell) * 6.0f * dot;
+    int column = int(floor(local / dot));
+    if (column > 4) return 0.0f;
+    int row = 6 - int(floor(t / dot));
+    int glyph = clamp(borderGlyph(b, cell), 0, 39);
+    if (((kBorderGlyphs[glyph][row] >> (4 - column)) & 1) == 0) return 0.0f;
+    float2 centre = float2((float(column) + 0.5f) * dot, (float(6 - row) + 0.5f) * dot);
+    float distance = length(float2(local, t) - centre);
+    return 1.0f - smoothstep(0.4f * dot - pixel, 0.4f * dot + pixel, distance);
+}
+
+// A rounded rectangle's signed distance (negative inside).
+static inline float roundedBox(float2 q, float2 centre, float2 halfSize, float radius) {
+    float2 outside = abs(q - centre) - halfSize + radius;
+    return length(max(outside, 0.0f)) + min(max(outside.x, outside.y), 0.0f) - radius;
+}
+
+// The border's colour at canvas point `q` (canvas heights), sRGB-encoded. `d` is the distance out
+// from the photo's edge (the largest of the four), `pixel` an output pixel.
+static inline float3 borderColor(constant BorderParams &b, float2 q, float pixel) {
+    float aspect = b.canvas.x;
+    int style = int(b.canvas.y + 0.5f);
+    float2 p0 = b.photo.xy, p1 = b.photo.xy + b.photo.zw;
+    float shortSide = min(b.photo.z, b.photo.w), longSide = max(b.photo.z, b.photo.w);
+    bool landscape = b.photo.z >= b.photo.w;
+    float2 out2 = max(p0 - q, q - p1);
+    float d = max(out2.x, out2.y);
+    float3 color = b.color.rgb;
+
+    if (style == 2 || style == 3) {
+        // Film: its base, black in a positive, around the frame. The rebate runs along the long
+        // sides; `s` is along the film, `t` across it from its outer edge.
+        float3 base = float3(0.015f, 0.012f, 0.01f);
+        float s = landscape ? q.x : q.y;
+        float edgeNear = landscape ? q.y : q.x;
+        float edgeFar = landscape ? 1.0f - q.y : aspect - q.x;
+        float t = min(edgeNear, edgeFar);
+        bool printSide = edgeFar <= edgeNear;
+        float along0 = landscape ? p0.x : p0.y;
+        float centre = landscape ? 0.5f * (p0.x + p1.x) : 0.5f * (p0.y + p1.y);
+        color = base;
+        float frame = shortSide / (style == 2 ? 24.0f : 56.0f);
+        if (style == 2) {
+            // KS perforations, 2.79 × 1.98 mm at a 4.75 mm pitch, 2 mm from the edge.
+            float pitch = 4.75f * frame;
+            float along = fmod(s - centre + 100.0f * pitch + 0.5f * pitch, pitch) - 0.5f * pitch;
+            float hole = roundedBox(float2(along, t), float2(0.0f, 3.0f * frame), float2(1.395f, 0.99f) * frame, 0.5f * frame);
+            float lit = 1.0f - smoothstep(-pixel, pixel, hole);
+            color = mix(color, float3(0.98f, 0.93f, 0.84f), lit);
+        }
+        if (b.canvas.z > 0.5f && printSide) {
+            float height = style == 2 ? 1.1f * frame : 1.4f * frame;
+            float foot = style == 2 ? 0.45f * frame : 0.55f * frame;
+            float ink = edgePrint(b, s - (along0 + 0.04f * longSide), t - foot, height / 7.0f, pixel);
+            color = mix(color, float3(0.98f, 0.66f, 0.25f), ink);
+        }
+        return color;
+    }
+    if (style >= 4 && style <= 6) {
+        // An instant card, a shade darker where it meets the picture's recess.
+        float recess = 1.0f - smoothstep(0.0f, 0.004f * shortSide + pixel, d);
+        return color * (1.0f - 0.12f * recess);
+    }
+    if (style == 7) {
+        // A card mount, bevelled down to the window.
+        float bevel = smoothstep(0.0f, 0.03f * shortSide, d);
+        return mix(color * 0.86f, color, bevel);
+    }
+    if (style == 8) {
+        // A plastic mount with a moulded rim around the window and at its outer edge.
+        float rim = smoothstep(0.035f * shortSide - pixel, 0.035f * shortSide + pixel, d)
+            * (1.0f - smoothstep(0.05f * shortSide - pixel, 0.05f * shortSide + pixel, d));
+        float edgeDistance = min(min(q.x, aspect - q.x), min(q.y, 1.0f - q.y));
+        float outer = 1.0f - smoothstep(0.02f * shortSide - pixel, 0.02f * shortSide + pixel, edgeDistance);
+        return color * (1.0f + 0.18f * max(rim, outer));
+    }
+    if (style == 9) {
+        // A filed-out negative carrier prints a black edge, rough where the file left it, on paper.
+        bool across = out2.x >= out2.y;
+        float along = across ? q.y : q.x;
+        float rough = valueNoise(float2(along / (0.006f * shortSide), across ? 1.0f : 7.0f), 211u) * 0.6f
+            + valueNoise(float2(along / (0.0015f * shortSide), across ? 3.0f : 9.0f), 223u) * 0.4f;
+        float edge = 0.035f * shortSide * (0.55f + 0.9f * rough);
+        float black = 1.0f - smoothstep(edge - pixel, edge + pixel, d);
+        return mix(color, float3(0.02f), black);
+    }
+    // Plain, with its keyline.
+    float width = b.keyline.x, gap = b.keyline.y;
+    if (width > 0.0f) {
+        float line = clamp((d - gap) / pixel + 0.5f, 0.0f, 1.0f) * clamp((gap + width - d) / pixel + 0.5f, 0.0f, 1.0f);
+        color = mix(color, b.keylineColor.rgb, line);
+    }
+    return color;
+}
+
+// Fills the border around the photo, which rl_develop has already drawn into its rect, in the same
+// output encoding.
+kernel void rl_border(
+    texture2d<float, access::write> out [[texture(0)]],
+    constant DevelopParams &p [[buffer(0)]],
+    constant BorderParams &b [[buffer(1)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    uint width = uint(b.area.x), height = uint(b.area.y);
+    if (gid.x >= width || gid.y >= height) return;
+    if (float(gid.x) >= b.photoPixels.x && float(gid.x) < b.photoPixels.z && float(gid.y) >= b.photoPixels.y
+        && float(gid.y) < b.photoPixels.w) return;
+    float2 uv = b.region.xy + (float2(gid) + 0.5f) / float2(width, height) * b.region.zw;
+    float2 q = float2(uv.x * b.canvas.x, uv.y);
+    float pixel = b.region.w / float(height);
+    float3 encoded = clamp(borderColor(b, q, pixel), 0.0f, 1.0f);
+    // sRGB to linear Rec. 2020, then into the output gamut as rl_develop puts the photo there.
+    float3 linear = srgbDecode3(encoded);
+    float3 rec2020 = float3(dot(float3(0.6274040f, 0.3292820f, 0.0433136f), linear),
+                            dot(float3(0.0690970f, 0.9195400f, 0.0113612f), linear),
+                            dot(float3(0.0163916f, 0.0880132f, 0.8955950f), linear));
+    encoded = srgbEncode3(gamutMap(rec2020, p));
+    int encoding = int(p.geometry.z);
+    float3 result = encoding == 4 ? rec2020ToOKLab(rec2020)
+        : encoding == 0 || encoding == 3 || encoding == 6 ? srgbDecode3(encoded) : encoded;
+    out.write(float4(result, 1.0f), gid);
+}
+
+// MARK: - Glow
+
+// A wide, smooth blur with a long tail, as a point spread falls off: six half-octave levels
+// from `radius` (a fraction of the long side), each a hexagon of taps around the centre so the
+// coarse mip levels' blocks don't show. `core` gets the first three levels only, a tighter spread.
+static inline float3 wideGlow(texture2d<float, access::sample> map, float2 uv, float radius, thread float3 &core) {
+    constexpr sampler mipSampler(coord::normalized, filter::linear, mip_filter::linear, address::clamp_to_edge);
+    float2 size = float2(map.get_width(0), map.get_height(0));
+    float baseLevel = log2(max(radius * max(size.x, size.y), 1.0f));
+    float maxLevel = float(map.get_num_mip_levels() - 1);
+    const float2 hexagon[6] = {
+        float2(1.0f, 0.0f), float2(0.5f, 0.866f), float2(-0.5f, 0.866f),
+        float2(-1.0f, 0.0f), float2(-0.5f, -0.866f), float2(0.5f, -0.866f),
+    };
+    float3 sum = 0.0f;
+    float total = 0.0f;
+    core = 0.0f;
+    float coreTotal = 0.0f;
+    for (int step = 0; step < 6; step++) {
+        float lod = min(baseLevel + 0.5f * float(step), maxLevel);
+        float2 texel = exp2(lod) / size;
+        float rotation = 0.5f * float(step);
+        float2x2 turn = float2x2(float2(cos(rotation), sin(rotation)), float2(-sin(rotation), cos(rotation)));
+        float3 taps = map.sample(mipSampler, uv, level(lod)).rgb;
+        for (int i = 0; i < 6; i++) {
+            taps += map.sample(mipSampler, uv + texel * 1.2f * (turn * hexagon[i]), level(lod)).rgb;
+        }
+        float weight = exp2(-0.35f * float(step));
+        sum += weight * taps / 7.0f;
+        total += weight;
+        if (step < 3) {
+            core += weight * taps / 7.0f;
+            coreTotal += weight;
+        }
+    }
+    core /= coreTotal;
+    return sum / total;
+}
+
+// MARK: - Masks
+
+#include "Masks.h"
+
+// MARK: - Develop
+
+// Process 3: a bitmap is already rendered, so it stands in for the tone curve's output: undo the
+// curve and the default edit shows the file as it is (as Lightroom does). Redlamp Reproduction,
+// which has no curve to stand in for, undoes it only as far as its Amount falls short of 100.
+static inline float3 undoneToneCurve(float3 camera, constant DevelopParams &p) {
+    float3 shown = clamp(mul3(p.camToWork0, p.camToWork1, p.camToWork2, camera), 0.0f, 1.0f);
+    // Undoing the curve saturates bright colours beyond the camera's (sRGB) primaries, so a
+    // channel may go negative here; working space takes it back.
+    float3 undone = mul3(p.workToCam0, p.workToCam1, p.workToCam2, inverseToneCurve(shown));
+    return p.lookTable.w > 0.0f ? mix(undone, camera, p.lookTable.w) : undone;
+}
+
+// Calibration's Shadows Tint: green or magenta in the shadows, fading out by middle grey, at
+// constant luminance.
+static inline float3 shadowsTint(float3 scene, constant DevelopParams &p) {
+    float y = max(dot(scene, kRec2020Luma), 0.0f);
+    float shadow = 1.0f - smoothstep(0.0f, kMiddleGrey * 1.5f, y);
+    return max(scene + p.calibration.x * 0.12f * shadow * y * float3(1.0f, -0.4749f, 1.0f), 0.0f);
+}
+
+// The tone controls' EV for a pixel at `ev` (its luminance over middle grey, in stops).
+static inline float toneControlsEV(
+    float ev, float toneDetail, float4 localTone, float2 localTone2, constant DevelopParams &p)
+{
+    // Highlights and Shadows weigh the region's brightness (process 7), so its detail moves with it.
+    float baseEV = ev - toneDetail;
+    float highlightWeight = smoothstep(-0.5f, 2.5f, baseEV);
+    float shadowWeight = (1.0f - smoothstep(-4.5f, 0.0f, baseEV)) * smoothstep(-10.0f, -5.5f, baseEV);
+    // From process 13 the masks' Whites and Blacks move this pixel's white and black points, as
+    // the global sliders move the photo's; before, they weighed its brightest and darkest tones.
+    bool maskEndPoints = p.grain2.z > 0.5f;
+    float adjustedEV = ev * (1.0f + p.tone.y + localTone.y * 0.32f)
+        + (p.tone.z + localTone.z) * 1.25f * highlightWeight
+        + (p.tone.w + localTone.w) * 1.6f * shadowWeight;
+    if (!maskEndPoints) {
+        adjustedEV += localTone2.x * 0.9f * smoothstep(0.5f, 3.0f, ev)
+            + localTone2.y * 0.9f * (1.0f - smoothstep(-8.0f, -2.5f, ev));
+    }
+    // Dynamic range: compress highlights above +0.5 EV (monotonic for compression <= 0.5).
+    if (p.recipe.z > 0.0f) {
+        adjustedEV -= p.recipe.z * smoothstep(0.5f, 4.5f, adjustedEV) * (adjustedEV - 0.5f);
+    }
+    return adjustedEV;
+}
+
+// The white and black points (x, y). From process 13 a mask's Whites scale the white point as the
+// global slider does (DevelopParameters), and its Blacks add to the global Blacks before they set
+// the black point.
+static inline float2 endPoints(float2 localTone2, constant DevelopParams &p) {
+    float whitePoint = p.tone2.x;
+    float blackPoint = p.tone2.y;
+    if (p.grain2.z > 0.5f) {
+        whitePoint *= exp2(-0.85f * localTone2.x);
+        float blacks = p.grain2.w + localTone2.y;
+        blackPoint = blacks > 0.0f ? -0.012f * blacks : -0.008f * blacks;
+    }
+    return float2(whitePoint, blackPoint);
+}
+
+// Edge-aware masks one pixel splits at most (MSK-27); any more blend by coverage there.
+constant int kMaxSplits = 2;
+
+// The stages of `rl_develop` the masked colour behind a partly covered pixel goes through for an
+// edge-aware mask (MSK-27, process 14): the pixel's own, from white balance to the end points,
+// without those that read the pixels around it (Defringe, halation and bloom). Returns the tone
+// curve's input.
+static inline float3 sceneOfColor(
+    float3 camera, float toneDetail, float2 localColor, float4 localTone, float2 localTone2, float2 sourceUV,
+    constant DevelopParams &p, texture3d<float, access::read> hueSatCool, texture3d<float, access::read> hueSatWarm,
+    texture3d<float, access::sample> gainTable)
+{
+    camera *= p.wbRatio.xyz;
+    camera *= float3(exp2(localColor.x * 0.6f), exp2(-localColor.y * 0.4f), exp2(-localColor.x * 0.6f));
+    float3 scene = max(mul3(p.camToWork0, p.camToWork1, p.camToWork2, camera), 0.0f);
+    if (p.hueSat.x > 0.5f) {
+        scene = max(applyHueSatMap(scene, hueSatCool, hueSatWarm, p), 0.0f);
+    }
+    if (p.gainTable.x > 0.0f) {
+        scene *= pow(gainTableAt(scene, sourceUV, gainTable, p), p.gainTable.x);
+    }
+    scene *= p.tone.x * exp2(localTone.x);
+    if (p.calibration.x != 0.0f) {
+        scene = shadowsTint(scene, p);
+    }
+    float ev = log2(max(dot(scene, kRec2020Luma), 1e-7f) / kMiddleGrey);
+    scene *= exp2(toneControlsEV(ev, toneDetail, localTone, localTone2, p) - ev);
+    float2 ends = endPoints(localTone2, p);
+    return max((scene - ends.y) / (1.0f - ends.y), 0.0f) / ends.x;
+}
+
+kernel void rl_develop(
+    texture2d<float, access::sample> source [[texture(0)]],
+    texture2d<float, access::write> out [[texture(1)]],
+    texture2d<float, access::sample> denoised [[texture(2)]],
+    constant DevelopParams &p [[buffer(0)]],
+    constant float *toneLUT [[buffer(1)]],
+    constant float *mixer [[buffer(2)]],
+    constant MaskLayerGPU *layers [[buffer(3)]],
+    constant MaskComponentGPU *components [[buffer(4)]],
+    texture3d<half, access::read> lookTable [[texture(3)]],
+    texture2d<float, access::sample> hazeMap [[texture(4)]],
+    texture2d<float, access::sample> glowSource [[texture(5)]],
+    texture2d<float, access::sample> glowLights [[texture(8)]],
+    texture2d_array<float, access::sample> maskRasters [[texture(6)]],
+    texture2d<float, access::sample> maskGuide [[texture(7)]],
+    texture3d<float, access::read> hueSatCool [[texture(9)]],
+    texture3d<float, access::read> hueSatWarm [[texture(10)]],
+    texture3d<float, access::sample> gainTable [[texture(11)]],
+    texture2d<float, access::sample> toneBase [[texture(12)]],
+    texture2d<float, access::sample> refinedHaze [[texture(13)]],
+    constant float4 *lensTable [[buffer(5)]],
+    constant float *maskCurves [[buffer(6)]],
+    texture2d_array<float, access::sample> maskEdges [[texture(14)]],
+    texture2d_array<float, access::sample> maskColors [[texture(15)]],
+    constant PointColorGPU *pointColor [[buffer(7)]],
+    constant float4 *maskPointColors [[buffer(8)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    uint width = uint(p.outputSize.x);
+    uint height = uint(p.outputSize.y);
+    if (gid.x >= width || gid.y >= height) return;
+
+    constexpr sampler linearSampler(coord::normalized, filter::linear, mip_filter::linear, address::clamp_to_edge);
+    // The whole developed (cropped) frame, so vignette and grain don't depend on the region...
+    float2 uv = p.region.xy + (float2(gid) + 0.5f) / float2(width, height) * p.region.zw;
+    // ...and the photo point behind it, which masks are placed in.
+    float2 imageUV, redUV, blueUV;
+    bool outsideImage = outputToImage(uv, p, lensTable, imageUV, redUV, blueUV);
+    float2 sourceUV = orient(imageUV, int(p.geometry.x));
+    float3 camera;
+    if (p.denoised.z > 0.0f) {
+        constexpr sampler areaSampler(coord::normalized, filter::linear, address::clamp_to_edge);
+        camera = denoised.sample(areaSampler, (sourceUV - p.denoised.xy) / p.denoised.zw).rgb;
+        // The profile's lateral chromatic aberration: red and blue from where the lens put them.
+        if (p.lensProfile.w > 0.5f) {
+            camera.r = denoised.sample(areaSampler, (orient(redUV, int(p.geometry.x)) - p.denoised.xy) / p.denoised.zw).r;
+            camera.b = denoised.sample(areaSampler, (orient(blueUV, int(p.geometry.x)) - p.denoised.xy) / p.denoised.zw).b;
+        }
+    } else {
+        camera = source.sample(linearSampler, sourceUV, level(p.geometry.y)).rgb;
+        if (p.lensProfile.w > 0.5f) {
+            camera.r = source.sample(linearSampler, orient(redUV, int(p.geometry.x)), level(p.geometry.y)).r;
+            camera.b = source.sample(linearSampler, orient(blueUV, int(p.geometry.x)), level(p.geometry.y)).b;
+        }
+    }
+    // From raw revision 3, values below black reach this far, so noise reduction and the pyramid's
+    // levels average them to their own level (DN-12); nothing after this takes them.
+    camera = max(camera, 0.0f);
+    // What AI mask edges are guided by (process 13), before any correction.
+    float maskEV = maskEdgeEV(camera);
+    // Edge-aware tone's detail (process 7, `ToneBase`): this pixel's log luminance above its
+    // region's, in the pyramid's camera RGB as the base was computed, before any correction.
+    float toneDetail = 0.0f;
+    float2 toneAB = float2(1.0f, 0.0f);
+    if (p.render.z > 0.5f) {
+        float toneEV = log2(max(dot(camera, float3(0.25f, 0.5f, 0.25f)), 1e-6f));
+        toneAB = toneBase.sample(linearSampler, sourceUV).rg;
+        toneDetail = toneEV - (toneAB.x * toneEV + toneAB.y);
+    }
+    // The refined haze map's guide (process 8, `Haze.guide`): brightness over the airlight, in the
+    // same camera RGB, before any correction.
+    float hazeGuide = dot(camera / max(p.haze.xyz, float3(1e-3f)), float3(1.0f / 3.0f));
+    // The profile's vignetting, at the radius the light was recorded at.
+    float vignetting = 1.0f;
+    if (p.lensProfile.x > 0.5f) {
+        float gain = lensTableAt(lensTable, lensRadius(imageUV, p), p).w;
+        camera *= gain;
+        vignetting *= gain;
+    }
+    // Lens vignetting, Lightroom's manual Vignetting: positive lightens the corners, by up to a
+    // stop, from the midpoint outwards.
+    if (p.lens.y != 0.0f) {
+        float radius = length((imageUV - 0.5f) * lensScale(p));
+        float gain = exp2(p.lens.y * smoothstep(0.9f * p.lens.z, 1.0f, radius));
+        camera *= gain;
+        vignetting *= gain;
+    }
+
+    // Mask coverage for every layer, then the summed local adjustments.
+    int layerCount = min(int(p.masks.x), kMaxMaskLayers);
+    float coverage[kMaxMaskLayers];
+    float2 maskPosition = float2(imageUV.x * p.toImage0.w, imageUV.y);
+    float4 localColor = 0.0f;
+    float4 localTone = 0.0f;
+    float2 localTone2 = 0.0f;
+    float localDehaze = 0.0f;
+    float2 localGlow = 0.0f;
+    float2 localFringe = 0.0f;
+    float2 localSwatch = 0.0f;
+    MaskImages maskImages = { maskRasters, maskGuide, maskEdges, sourceUV, maskEV };
+    float textureMagnitude = -1.0f;
+    // Edge-aware masks (MSK-27, process 14): a layer whose only component is an AI mask with colour
+    // maps splits a partly covered pixel's light. There its per-pixel scene-referred adjustments stay
+    // out of the sums and reach only the masked share of the light (below), from the colours either
+    // side of the edge.
+    int splitCount = 0;
+    int splitLayer[kMaxSplits];
+    float splitAlpha[kMaxSplits];
+    float splitStrength[kMaxSplits];
+    float3 splitInside[kMaxSplits];
+    float3 splitOutside[kMaxSplits];
+    for (int i = 0; i < layerCount; i++) {
+        coverage[i] = evaluateMaskLayer(layers[i], components, maskPosition, maskImages);
+        float alpha = coverage[i];
+        if (layers[i].detail.y != 0.0f) {
+            if (textureMagnitude < 0.0f) {
+                textureMagnitude = maskTextureMagnitude(source, sourceUV, uint(layers[i].detail.z));
+            }
+            coverage[i] *= maskDetailFactor(textureMagnitude, layers[i].detail.y);
+        }
+        float sceneWeight = coverage[i];
+        if (int(layers[i].tone2.w) == 1 && alpha > 0.002f && alpha < 0.998f && splitCount < kMaxSplits) {
+            MaskComponentGPU c = components[int(layers[i].tone2.z)];
+            if (abs(c.shape.x - 3.0f) < 0.5f && c.rotation.x > 0.5f) {
+                constexpr sampler colorSampler(coord::normalized, filter::linear, address::clamp_to_edge);
+                uint pair = 2 * uint(c.rotation.x - 0.5f);
+                float3 inside = maskColors.sample(colorSampler, sourceUV, pair).rgb * vignetting;
+                float3 outside = maskColors.sample(colorSampler, sourceUV, pair + 1).rgb * vignetting;
+                // The component's Invert or the whole mask's (not both) swaps the sides.
+                bool inverted = (c.shape.z > 0.5f) != (layers[i].detail.w > 0.5f);
+                splitInside[splitCount] = inverted ? outside : inside;
+                splitOutside[splitCount] = inverted ? inside : outside;
+                splitLayer[splitCount] = i;
+                splitAlpha[splitCount] = alpha;
+                splitStrength[splitCount] = coverage[i] / alpha;
+                splitCount++;
+                sceneWeight = 0.0f;
+            }
+        }
+        localColor += float4(sceneWeight, sceneWeight, coverage[i], coverage[i]) * layers[i].color;
+        localTone += sceneWeight * layers[i].tone;
+        localTone2 += sceneWeight * layers[i].tone2.xy;
+        localDehaze += coverage[i] * layers[i].detail.x;
+        localGlow += coverage[i] * layers[i].glow.xy;
+        localFringe += coverage[i] * layers[i].glow.zw;
+        localSwatch += coverage[i] * layers[i].display.xy;
+    }
+
+    // Scene-referred: white balance (global and local), camera matrix, exposure.
+    // Dehaze, in the camera RGB the haze map was measured in: invert I = J t + A (1 - t), with the
+    // transmission t from the dark channel prior; negative values add a neutral veil a little
+    // darker than the airlight.
+    float dehaze = p.haze.w + localDehaze;
+    if (dehaze != 0.0f) {
+        constexpr sampler hazeSampler(coord::normalized, filter::linear, address::clamp_to_edge);
+        float3 airlight = p.haze.xyz;
+        if (dehaze > 0.0f) {
+            float dark;
+            if (p.render.w > 0.5f) {
+                float3 refined = refinedHaze.sample(hazeSampler, sourceUV).rgb;
+                dark = clamp(min(refined.x * hazeGuide + refined.y, refined.z), 0.0f, 1.0f);
+            } else {
+                dark = hazeMap.sample(hazeSampler, sourceUV).r;
+            }
+            float transmission = max(1.0f - 0.95f * min(dehaze, 1.0f) * dark, 0.2f);
+            camera = max((camera - airlight) / transmission + airlight, 0.0f);
+            for (int k = 0; k < splitCount; k++) {
+                splitInside[k] = max((splitInside[k] - airlight) / transmission + airlight, 0.0f);
+                splitOutside[k] = max((splitOutside[k] - airlight) / transmission + airlight, 0.0f);
+            }
+        } else {
+            float veil = 0.8f * (airlight.r + airlight.g + airlight.b) / 3.0f;
+            float amount = 0.3f * min(-dehaze, 1.0f);
+            camera += (veil - camera) * amount;
+            for (int k = 0; k < splitCount; k++) {
+                splitInside[k] += (veil - splitInside[k]) * amount;
+                splitOutside[k] += (veil - splitOutside[k]) * amount;
+            }
+        }
+    }
+    if (p.render.x > 0.5f && p.lookTable.w < 1.0f) {
+        camera = undoneToneCurve(camera, p);
+        for (int k = 0; k < splitCount; k++) {
+            splitInside[k] = undoneToneCurve(splitInside[k], p);
+            splitOutside[k] = undoneToneCurve(splitOutside[k], p);
+        }
+    }
+    if (localFringe.y > 0.0f) {
+        camera = removeMoire(camera, source, sourceUV, localFringe.y, p);
+    }
+    // Each split layer's share of this pixel's light: the colours either side mixed by coverage,
+    // each where its error is smaller (the inside colour's is scaled by alpha, the outside's by
+    // 1 - alpha), within the pixel's own light. The difference the layer's adjustments make to
+    // the masked colour, scaled by alpha, joins the pixel before the tone curve.
+    float3 splitDelta = 0.0f;
+    for (int k = 0; k < splitCount; k++) {
+        float a = splitAlpha[k];
+        float3 share = (1.0f - a) * a * splitInside[k] + a * (camera - (1.0f - a) * splitOutside[k]);
+        float3 masked = clamp(share, float3(0.0f), max(camera, float3(0.0f))) / a;
+        float maskedEV = log2(max(dot(masked / vignetting, float3(0.25f, 0.5f, 0.25f)), 1e-6f));
+        float detail = maskedEV - (toneAB.x * maskedEV + toneAB.y);
+        MaskLayerGPU layer = layers[splitLayer[k]];
+        float s = splitStrength[k];
+        float3 edited = sceneOfColor(
+            masked, detail, localColor.xy + s * layer.color.xy, localTone + s * layer.tone,
+            localTone2 + s * layer.tone2.xy, sourceUV, p, hueSatCool, hueSatWarm, gainTable);
+        float3 plain = sceneOfColor(
+            masked, detail, localColor.xy, localTone, localTone2, sourceUV, p, hueSatCool, hueSatWarm, gainTable);
+        splitDelta += a * (edited - plain);
+    }
+    camera *= p.wbRatio.xyz;
+    camera *= float3(exp2(localColor.x * 0.6f), exp2(-localColor.y * 0.4f), exp2(-localColor.x * 0.6f));
+    float3 scene = max(mul3(p.camToWork0, p.camToWork1, p.camToWork2, camera), 0.0f);
+    if (p.hueSat.x > 0.5f) {
+        scene = max(applyHueSatMap(scene, hueSatCool, hueSatWarm, p), 0.0f);
+    }
+    // A mask's Defringe adds to both of the global amounts, or holds them back where negative.
+    float2 fringeAmounts = clamp(p.defringe.xy + localFringe.x, 0.0f, 1.0f);
+    if (fringeAmounts.x > 0.0f || fringeAmounts.y > 0.0f) {
+        scene = max(defringe(scene, source, sourceUV, fringeAmounts, p), 0.0f);
+    }
+    if (p.gainTable.x > 0.0f) {
+        scene *= pow(gainTableAt(scene, sourceUV, gainTable, p), p.gainTable.x);
+    }
+    scene *= p.tone.x * exp2(localTone.x);
+    if (p.calibration.x != 0.0f) {
+        scene = shadowsTint(scene, p);
+    }
+    // Halation and bloom: highlight light scattered on its way to the image (see Glow.metal),
+    // added in scene light. Halation reflects off the film base behind the emulsion, so it
+    // reaches the red layer widest, the green a little and the blue (on top) not at all; its
+    // colour is the light's own red. Bloom spreads every colour, and a diffusion filter also
+    // spreads a little of all the light, which lowers contrast.
+    // Masks add to (or take from) the glow where they cover; the radii stay global.
+    float halationAmount = max(p.glow.x + localGlow.x, 0.0f);
+    float bloomAmount = max(p.glow.z + localGlow.y, 0.0f);
+    if (halationAmount > 0.0f || bloomAmount > 0.0f) {
+        float3 toScene = p.wbRatio.xyz * p.tone.x * exp2(localTone.x);
+        constexpr sampler glowSampler(coord::normalized, filter::linear, address::clamp_to_edge);
+        // Inside an evenly bright area the scattered light is the area's own, which a print or
+        // scan balances out; only light spilling past edges shows. So glow is what the
+        // surroundings send beyond the pixel's own highlight light.
+        float3 own = glowSource.sample(glowSampler, sourceUV, level(0.0f)).rgb;
+        float3 core;
+        if (halationAmount > 0.0f) {
+            float3 wide = p.render.y > 0.5f ? wideGlow(glowLights, sourceUV, p.glow.y, core)
+                : wideGlow(glowSource, sourceUV, p.glow.y, core);
+            wide = max(mul3(p.camToWork0, p.camToWork1, p.camToWork2, max(wide - own, 0.0f) * toScene), 0.0f);
+            core = max(mul3(p.camToWork0, p.camToWork1, p.camToWork2, max(core - own, 0.0f) * toScene), 0.0f);
+            float h = 0.12f * halationAmount;
+            scene.r += h * mix(dot(wide, kRec2020Luma), wide.r, 0.5f);
+            scene.g += 0.25f * h * mix(dot(core, kRec2020Luma), core.g, 0.5f);
+        }
+        if (bloomAmount > 0.0f) {
+            float3 spread = wideGlow(glowSource, sourceUV, p.glow.w, core);
+            float3 highlights = max(mul3(p.camToWork0, p.camToWork1, p.camToWork2,
+                max(spread - own, 0.0f) * toScene), 0.0f);
+            float3 all = max(mul3(p.camToWork0, p.camToWork1, p.camToWork2,
+                wideGlow(source, sourceUV, p.glow.w, core) * toScene), 0.0f);
+            scene = mix(scene, all, 0.1f * bloomAmount) + 0.08f * bloomAmount * highlights;
+        }
+    }
+    // Tone controls in log space around middle grey, applied as a luminance ratio.
+    float luma = max(dot(scene, kRec2020Luma), 1e-7f);
+    float ev = log2(luma / kMiddleGrey);
+    scene *= exp2(toneControlsEV(ev, toneDetail, localTone, localTone2, p) - ev);
+
+    // Black and white points, then the tone curve to display-referred (still Rec.2020 primaries).
+    float2 ends = endPoints(localTone2, p);
+    float whitePoint = ends.x;
+    float blackPoint = ends.y;
+    scene = max((scene - blackPoint) / (1.0f - blackPoint), 0.0f);
+    if (splitCount > 0) {
+        scene = max(scene + splitDelta * whitePoint, 0.0f);
+    }
+    float3 display = toneCurve(scene / whitePoint);
+    // Redlamp Reproduction leaves the curve out, so each tone keeps its scene value up to white.
+    if (p.lookTable.w > 0.0f) {
+        display = p.lookTable.w < 1.0f ? mix(display, scene / whitePoint, p.lookTable.w) : scene / whitePoint;
+    }
+
+    // A scene-referred Base Look (a film model) takes the place of the tone curve.
+    if (p.lookTable.x > 0.0f && p.lookTable.z > 0.5f) {
+        float3 film = sampleLookTable(lookTable, sceneLogEncode3(scene / whitePoint), p.lookTable.y);
+        display = max(mix(display, srgbDecode3(max(film, 0.0f)), p.lookTable.x), 0.0f);
+    }
+    // A display-referred Base Look's table, on the tone curve's output, under every user color control.
+    if (p.lookTable.x > 0.0f && p.lookTable.z < 0.5f) {
+        float3 looked = sampleLookTable(lookTable, srgbEncode3(clamp(display, 0.0f, 1.0f)), p.lookTable.y);
+        display = max(mix(display, srgbDecode3(max(looked, 0.0f)), p.lookTable.x), 0.0f);
+    }
+    // Perceptual color work in OKLCh.
+    float3 lab = rec2020ToOKLab(display);
+    float chroma = length(lab.yz);
+    // An exact grey has no hue, and atan2(0, 0) is NaN under fast math.
+    float hue = chroma > 0.0f ? atan2(lab.z, lab.y) * (180.0f / M_PI_F) : 0.0f;
+    if (hue < 0.0f) hue += 360.0f;
+
+    float saturation = p.color.y;
+    float vibrance = p.color.x;
+    float skin = hueBump(hue, 55.0f, 30.0f);
+    float lowChroma = 1.0f - smoothstep(0.0f, 0.18f, chroma);
+    saturation *= 1.0f + vibrance * lowChroma * (vibrance > 0.0f ? (1.0f - 0.6f * skin) : 1.0f);
+    saturation *= 1.0f + p.look.x * hueBump(hue, 150.0f, 55.0f);
+    saturation *= 1.0f - p.look.y * skin * 0.5f;
+
+    if (p.look.z > 0.5f) {
+        // Partition-of-unity weights between the two nearest band centres.
+        float hueShift = 0.0f, bandSaturation = 0.0f, bandLuminance = 0.0f;
+        for (int i = 0; i < 8; i++) {
+            int j = (i + 1) % 8;
+            float start = kBandHues[i];
+            float end = j == 0 ? kBandHues[0] + 360.0f : kBandHues[j];
+            float h = hue < start ? hue + 360.0f : hue;
+            if (h >= start && h < end) {
+                float t = smoothstep(0.0f, 1.0f, (h - start) / (end - start));
+                hueShift = mix(mixer[i], mixer[j], t);
+                bandSaturation = mix(mixer[8 + i], mixer[8 + j], t);
+                bandLuminance = mix(mixer[16 + i], mixer[16 + j], t);
+                break;
+            }
+        }
+        float colorfulness = smoothstep(0.0f, 0.04f, chroma);
+        hue += hueShift * 30.0f * colorfulness;
+        saturation *= 1.0f + bandSaturation;
+        lab.x += bandLuminance * 0.15f * colorfulness * smoothstep(0.0f, 0.1f, chroma);
+    }
+
+    // Point Color: each swatch pulls the colours it selects towards its own, or pushes them apart,
+    // then shifts them; a mask's swatches only as far as the mask covers. Every swatch reads the same
+    // colour, and their changes add up; chroma's goes through the gamut-relative boost below with the
+    // other saturation changes.
+    float visualizedWeight = 1.0f;
+    float selectedChroma = chroma * max(saturation, 0.0f);
+    // Output encoding 5: what Point Color receives, for the eyedropper and a mask's own colour, with
+    // that mask's coverage.
+    if (int(p.geometry.z) == 5) {
+        float radians = hue * (M_PI_F / 180.0f);
+        int measured = int(p.pointColor.z) - 1;
+        float alpha = measured >= 0 ? (measured < layerCount ? coverage[measured] : 0.0f) : 1.0f;
+        out.write(float4(lab.x, selectedChroma * cos(radians), selectedChroma * sin(radians), alpha), gid);
+        return;
+    }
+    int swatches = min(int(p.pointColor.x), kMaxPointColorSwatches);
+    if (swatches > 0) {
+        float hueChange = 0.0f, chromaStops = 0.0f, lightnessChange = 0.0f;
+        for (int i = 0; i < swatches; i++) {
+            PointColorGPU s = pointColor[i];
+            int layer = int(s.color.w) - 1;
+            float covered = layer < 0 ? 1.0f : (layer < layerCount ? coverage[layer] : 0.0f);
+            if (layer >= 0 && s.uniformity.w > 0.5f) {
+                float4 own = maskPointColors[layer];
+                s.color.xyz = own.xyz;
+                if (own.w <= 0.0f) covered = 0.0f;
+            }
+            float w = covered > 0.0f ? pointColorWeight(s, lab.x, selectedChroma, hue) * covered : 0.0f;
+            if (int(p.pointColor.y) == i + 1) visualizedWeight = w;
+            if (w <= 0.0f) continue;
+            float3 scale = -s.uniformity.xyz * w;
+            hueChange += (fmod(hue - s.color.z + 540.0f, 360.0f) - 180.0f) * scale.x + s.shift.x * w;
+            chromaStops += log2(max(selectedChroma, 1e-4f) / max(s.color.y, 0.02f)) * scale.y
+                + log2(max(1.0f + s.shift.y * w, 1e-3f));
+            lightnessChange += (lab.x - s.color.x) * scale.z + s.shift.z * w;
+        }
+        hue += hueChange;
+        saturation *= exp2(chromaStops);
+        lab.x += lightnessChange;
+    }
+
+    saturation *= 1.0f + localColor.w;
+    hue += localColor.z * smoothstep(0.0f, 0.04f, chroma);
+    chroma = boostChroma(chroma, chroma * max(saturation, 0.0f), lab.x, hue * (M_PI_F / 180.0f), p);
+    // Color chrome: deeper, denser tones in strongly saturated colors (blues for FX Blue).
+    if ((p.recipe.x > 0.0f || p.recipe.y > 0.0f) && p.color.w < 0.5f) {
+        float depth = (p.recipe.x + p.recipe.y * hueBump(hue, 255.0f, 45.0f)) * smoothstep(0.05f, 0.2f, chroma);
+        lab.x *= 1.0f - 0.12f * depth;
+        chroma *= 1.0f + 0.06f * depth;
+    }
+    if (p.color.w > 0.5f) chroma = 0.0f;
+    float hueRadians = hue * (M_PI_F / 180.0f);
+    lab.y = chroma * cos(hueRadians);
+    lab.z = chroma * sin(hueRadians) + p.color.z;
+
+    if (p.gradeShape.z > 0.5f) {
+        float blending = p.gradeShape.x;
+        float pivot = 0.5f - p.gradeShape.y * 0.2f;
+        float width = 0.08f + 0.3f * blending;
+        float L = clamp(lab.x, 0.0f, 1.0f);
+        float shadows = 1.0f - smoothstep(pivot - 0.2f - width, pivot - 0.2f + width, L);
+        float highlights = smoothstep(pivot + 0.2f - width, pivot + 0.2f + width, L);
+        float midtones = max(0.0f, 1.0f - shadows - highlights);
+        float3 offset = shadows * p.gradeShadows.xyz + midtones * p.gradeMidtones.xyz
+                        + highlights * p.gradeHighlights.xyz + p.gradeGlobal.xyz;
+        lab.y += offset.x;
+        lab.z += offset.y;
+        lab.x += offset.z;
+    }
+    // The masks' Color swatches tint as Color Grading's Global wheel does.
+    lab.y += localSwatch.x;
+    lab.z += localSwatch.y;
+
+    // Curve, vignette and grain work on sRGB-transfer-encoded Rec.2020 values; the gamut is
+    // only reduced to the output's at the end.
+    float3 encoded = srgbEncode3(max(okLabToRec2020(lab), 0.0f));
+
+    if (p.tone2.z > 0.5f) {
+        // One table for every channel, or red's, green's and blue's, one after another.
+        uint stride = p.tone2.z > 1.5f ? kToneLUTSize : 0u;
+        encoded = float3(
+            sampleLUT(toneLUT, encoded.r), sampleLUT(toneLUT + stride, encoded.g),
+            sampleLUT(toneLUT + 2 * stride, encoded.b));
+    }
+
+    // The masks' Curves, in mask order, each as far as its mask covers: the RGB curve on every
+    // channel, then each channel's own.
+    for (int i = 0; i < layerCount; i++) {
+        int table = int(layers[i].display.z) - 1;
+        float weight = coverage[i] * layers[i].display.w;
+        if (table < 0 || weight == 0.0f) continue;
+        constant float *curves = maskCurves + table * 4 * kMaskCurveSize;
+        float3 curved = float3(
+            sampleMaskCurve(curves, encoded.r), sampleMaskCurve(curves, encoded.g), sampleMaskCurve(curves, encoded.b));
+        curved = float3(
+            sampleMaskCurve(curves + kMaskCurveSize, curved.r), sampleMaskCurve(curves + 2 * kMaskCurveSize, curved.g),
+            sampleMaskCurve(curves + 3 * kMaskCurveSize, curved.b));
+        encoded = mix(encoded, curved, weight);
+    }
+
+    // Post-crop vignette.
+    if (p.vignette.x != 0.0f) {
+        // Roundness 0 follows the frame's aspect, +1 is a circle, -1 a rounded rectangle.
+        float aspect = p.geometry.w;
+        float roundness = p.vignette.z;
+        float2 q = (uv - 0.5f) * 2.0f;
+        if (roundness > 0.0f) {
+            if (aspect >= 1.0f) q.x *= mix(1.0f, aspect, roundness);
+            else q.y *= mix(1.0f, 1.0f / aspect, roundness);
+        }
+        float exponent = roundness < 0.0f ? mix(2.0f, 8.0f, -roundness) : 2.0f;
+        float distance = pow(pow(abs(q.x), exponent) + pow(abs(q.y), exponent), 1.0f / exponent);
+        float start = mix(0.15f, 1.25f, p.vignette.y);
+        float feather = mix(0.02f, 1.1f, p.vignette.w);
+        float amount = smoothstep(start - feather * 0.5f, start + feather * 0.5f, distance);
+        if (p.vignette.x < 0.0f) {
+            // Highlights keep bright areas bright as the corners darken (Highlight Priority).
+            float bright = smoothstep(0.5f, 1.0f, dot(encoded, kRec2020Luma)) * p.vignette2.x;
+            encoded *= 1.0f + p.vignette.x * amount * (1.0f - bright);
+        } else {
+            encoded += (1.0f - encoded) * p.vignette.x * amount;
+        }
+    }
+
+    // Mood effects, in whole-photo coordinates so they stay put as you zoom, and sized to the
+    // frame (a "frame pixel" is 1/3000 of the long side) so they look the same at any resolution.
+    float2 framePosition = float2(uv.x * p.geometry.w, uv.y);
+    if (p.mood0.x > 0.0f) {
+        encoded = lightLeak(encoded, framePosition, p.geometry.w, p.mood0);
+    }
+    if (p.mood0.w > 0.0f || p.mood1.x > 0.0f) {
+        float2 fullSize = p.outputSize.z * p.outputSize.xy / p.region.zw;
+        float2 fullPosition = p.region.xy * fullSize + float2(gid) * p.outputSize.z;
+        float framePixel = max(fullSize.x, fullSize.y) / 3000.0f;
+        float footprint = max(p.outputSize.z, 1.0f);
+        if (p.mood0.w > 0.0f) {
+            encoded = dust(encoded, fullPosition, framePixel, footprint, p.mood0.w);
+        }
+        if (p.mood1.x > 0.0f) {
+            encoded = scratches(encoded, fullPosition, fullSize, framePixel, footprint, p.mood1.x);
+        }
+    }
+
+    // Film grain, anchored to full-resolution pixel coordinates so it is zoom-stable.
+    if (p.grain.x > 0.0f) {
+        float2 fullSize = p.outputSize.z * p.outputSize.xy / p.region.zw;
+        float2 fullPosition = p.region.xy * fullSize + float2(gid) * p.outputSize.z;
+        float size = mix(0.6f, 3.5f, p.grain.y);
+        // Process 2 sizes grain to the frame: the same on a 24 MP photo (6000 pixels long), and
+        // proportionally larger or smaller on others, as film's grain is to its frame.
+        if (p.grain2.y > 0.5f) size *= max(fullSize.x, fullSize.y) / 6000.0f;
+        // Below full resolution each output pixel averages several grains, as downscaling an
+        // export does, so the preview shows the grain the export will have. Process 2's grain
+        // can be finer than a pixel, so it averages at full resolution too.
+        float footprint = p.grain2.y > 0.5f ? max(p.outputSize.z, 1.0f)
+            : (p.outputSize.z > 1.001f ? p.outputSize.z : 0.0f);
+        float roughness = p.grain.z * 0.6f;
+        uint seed = uint(p.grain.w);
+        float3 noise = grainNoise(fullPosition, size, footprint, roughness, seed, seed + 17u);
+        // Colour grain: each dye layer has its own grains, so the noise decorrelates per channel.
+        if (p.grain2.x > 0.0f) {
+            float3 layers = float3(
+                grainNoise(fullPosition, size, footprint, roughness, seed + 31u, seed + 47u),
+                grainNoise(fullPosition, size, footprint, roughness, seed + 59u, seed + 71u),
+                grainNoise(fullPosition, size, footprint, roughness, seed + 83u, seed + 97u));
+            noise = mix(noise, layers, p.grain2.x);
+        }
+        float L = dot(encoded, float3(0.2126f, 0.7152f, 0.0722f));
+        // Process 2 follows film: grain shows most in the low midtones and shadows, where a
+        // negative is thin, and fades in the highlights; process 1 peaks evenly in the midtones.
+        float weight = p.grain2.y > 0.5f
+            ? 0.25f + 3.2f * pow(max(L, 0.0f), 0.75f) * pow(max(1.0f - L, 0.0f), 1.4f)
+            : 0.35f + 2.6f * L * (1.0f - L);
+        encoded += noise * p.grain.x * 0.16f * weight;
+    }
+
+    // The frame is drawn last, over the grain, so its edges stay clean.
+    if (p.mood1.y > 0.5f) {
+        float pixel = p.region.w / max(float(height), 1.0f);
+        encoded = frameBorder(encoded, framePosition, p.geometry.w, int(p.mood1.y + 0.5f), mix(0.4f, 1.6f, p.mood1.z), pixel);
+    }
+
+    // Into the output gamut, sRGB-transfer encoded (sRGB and Display P3 share the curve).
+    encoded = srgbEncode3(gamutMap(srgbDecode3(max(encoded, 0.0f)), p));
+
+    if (p.tone2.w > 0.5f) {
+        if (any(encoded >= 0.998f)) encoded = float3(1.0f, 0.1f, 0.1f);
+        else if (all(encoded <= 0.002f)) encoded = float3(0.15f, 0.35f, 1.0f);
+    }
+
+    // The selected mask's overlay: masks.w is the colour, plus 8 × the style (MaskOverlayStyle),
+    // plus 64 × the tint's opacity in percent.
+    int overlay = int(p.masks.y);
+    if (overlay >= 0 && overlay < layerCount) {
+        const float3 overlayColors[4] = {
+            float3(0.95f, 0.18f, 0.18f), float3(0.2f, 0.9f, 0.3f), float3(0.25f, 0.45f, 1.0f), float3(1.0f),
+        };
+        int code = int(p.masks.w);
+        float3 tint = overlayColors[clamp(code & 7, 0, 3)];
+        float opacity = float(code >> 6) / 100.0f;
+        float cover = coverage[overlay];
+        float grey = dot(encoded, float3(0.2126f, 0.7152f, 0.0722f));
+        switch ((code >> 3) & 7) {
+        case 1: encoded = mix(float3(grey), tint, cover * opacity); break;
+        case 2: encoded *= cover; break;
+        case 3: encoded = mix(float3(1.0f), encoded, cover); break;
+        case 4: encoded = float3(cover); break;
+        case 5: {
+            constexpr sampler guideSampler(coord::normalized, filter::linear, address::clamp_to_edge);
+            float lightness = maskGuide.sample(guideSampler, imageUV).x;
+            encoded = mix(float3(lightness), tint, cover * opacity);
+            break;
+        }
+        case 6: encoded = mix(float3(grey), encoded, cover); break;
+        default: encoded = mix(encoded, tint, cover * opacity); break;
+        }
+    }
+
+    // Point Color's Visualize Range: the swatch's selection in colour, the rest grey, as Image on B&W.
+    if (p.pointColor.y > 0.5f) {
+        encoded = mix(float3(dot(encoded, float3(0.2126f, 0.7152f, 0.0722f))), encoded, visualizedWeight);
+    }
+
+    // Visualize Spots (RM-02): log luminance against a blur 8 times wider (three levels up the
+    // pyramid), white where they differ by more than the threshold.
+    if (p.spots.x > 0.5f) {
+        float3 weights = p.camToWork0.xyz * kRec2020Luma.x + p.camToWork1.xyz * kRec2020Luma.y
+            + p.camToWork2.xyz * kRec2020Luma.z;
+        float fine = log(max(dot(source.sample(linearSampler, sourceUV, level(p.geometry.y)).rgb, weights), 1e-4f));
+        float wide = log(max(dot(source.sample(linearSampler, sourceUV, level(p.geometry.y + 3.0f)).rgb, weights), 1e-4f));
+        encoded = float3(smoothstep(p.spots.y, p.spots.y * 1.5f, abs(fine - wide)));
+    }
+
+    // Output encoding: 0 linear output primaries, 1 sRGB-encoded sRGB, 2 sRGB-encoded Display P3,
+    // 4 OKLab (the output primaries are Rec.2020 then), 6 linear with the luminance the tone
+    // controls received in alpha (the readout's stops).
+    int encoding = int(p.geometry.z);
+    // Where rotation or Transform leaves no photo, the frame is white, as Lightroom's is.
+    if (outsideImage) encoded = float3(1.0f);
+    float3 result = encoding == 4 ? rec2020ToOKLab(srgbDecode3(encoded))
+        : encoding == 0 || encoding == 3 || encoding == 6 ? srgbDecode3(encoded) : encoded;
+    out.write(float4(result, encoding == 6 ? luma : 1.0f), gid + uint2(p.outputOrigin.xy));
+}
+
+// MARK: - Histogram
+
+struct HistogramParams {
+    uint width;
+    uint height;
+    uint step;
+    uint linearInput;   // 1 when the texture holds linear values that need encoding
+    uint originX;       // where the counted area starts: the photo inside its border
+    uint originY;
+};
+
+kernel void rl_histogram(
+    texture2d<float, access::read> image [[texture(0)]],
+    device atomic_uint *bins [[buffer(0)]],
+    constant HistogramParams &p [[buffer(1)]],
+    uint2 gid [[thread_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint2 tgSize [[threads_per_threadgroup]])
+{
+    threadgroup atomic_uint local[1024];
+    uint threads = tgSize.x * tgSize.y;
+    for (uint i = tid; i < 1024; i += threads) {
+        atomic_store_explicit(&local[i], 0u, memory_order_relaxed);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    uint2 pixel = gid * p.step;
+    if (pixel.x < p.width && pixel.y < p.height) {
+        float3 c = image.read(pixel + uint2(p.originX, p.originY)).rgb;
+        if (p.linearInput == 1) c = srgbEncode3(clamp(c, 0.0f, 1.0f));
+        c = clamp(c, 0.0f, 1.0f);
+        float luma = dot(c, float3(0.2126f, 0.7152f, 0.0722f));
+        atomic_fetch_add_explicit(&local[uint(c.r * 255.0f + 0.5f)], 1u, memory_order_relaxed);
+        atomic_fetch_add_explicit(&local[256 + uint(c.g * 255.0f + 0.5f)], 1u, memory_order_relaxed);
+        atomic_fetch_add_explicit(&local[512 + uint(c.b * 255.0f + 0.5f)], 1u, memory_order_relaxed);
+        atomic_fetch_add_explicit(&local[768 + uint(luma * 255.0f + 0.5f)], 1u, memory_order_relaxed);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint i = tid; i < 1024; i += threads) {
+        uint value = atomic_load_explicit(&local[i], memory_order_relaxed);
+        if (value > 0) atomic_fetch_add_explicit(&bins[i], value, memory_order_relaxed);
+    }
+}
+
+// A linear export, downscaled, to the sRGB transfer curve (which Display P3 shares).
+kernel void rl_encode_srgb(
+    texture2d<float, access::read> linear [[texture(0)]],
+    texture2d<float, access::write> out [[texture(1)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) return;
+    out.write(float4(srgbEncode3(clamp(linear.read(gid).rgb, 0.0f, 1.0f)), 1.0f), gid);
+}

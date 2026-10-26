@@ -1,0 +1,166 @@
+import Foundation
+import RedlampEngineAPI
+
+/// The repeating color-filter layout of a sensor. Colors are 0 = red, 1 = green, 2 = blue.
+public struct CFAPattern: Codable, Sendable, Hashable {
+    public let width: Int
+    public let height: Int
+    public let colors: [UInt8]
+
+    public init(width: Int, height: Int, colors: [UInt8]) {
+        precondition(colors.count == width * height)
+        self.width = width
+        self.height = height
+        self.colors = colors
+    }
+
+    /// Decoding skips `init`'s check: a pattern read from elsewhere is checked with this.
+    var isValid: Bool {
+        (1 ... 16).contains(width) && (1 ... 16).contains(height) && colors.count == width * height
+            && colors.allSatisfy { $0 <= 3 }
+    }
+
+    public func color(x: Int, y: Int) -> UInt8 {
+        colors[(y % height) * width + (x % width)]
+    }
+
+    public var description: String {
+        if width == 6 {
+            return "X-Trans"
+        }
+        let letters = colors.map { ["R", "G", "B"][Int($0)] }.joined()
+        return "Bayer \(letters)"
+    }
+}
+
+/// Sensor data ready for upload to the GPU, plus the calibration needed to develop it.
+public struct DecodedImage: Sendable {
+    public enum Layout: Codable, Sendable {
+        /// One `UInt16` sample per pixel behind a color filter array.
+        case mosaic(CFAPattern)
+        /// Three `UInt16` samples per pixel (linear DNG, e.g. ProRAW).
+        case linearRGB
+        /// Four float16 samples per pixel (RGBA), linear sRGB. Bitmap files.
+        case linearSRGBHalf
+        /// Four float16 samples per pixel (RGBA): camera RGB already demosaiced and multiplied by
+        /// the as-shot white balance over its smallest channel, as a session holds it. Focus
+        /// stacks; the pattern is the sensor's the frames were demosaiced from (`nil`: linear).
+        case balancedCameraHalf(CFAPattern?)
+    }
+
+    public let width: Int
+    public let height: Int
+    public let layout: Layout
+    /// Raw samples; float16 bit patterns for `.linearSRGBHalf`.
+    public let samples: [UInt16]
+    /// Black level per CFA position (or per channel for linear RGB).
+    public let blackLevels: [Float]
+    public let whiteLevel: Float
+    /// Camera white-balance multipliers as shot, green = 1.
+    public let asShotMultipliers: SIMD3<Double>
+    /// Row-major camera RGB → linear sRGB (D65), for white-balanced camera data.
+    public let cameraToSRGB: [Double]
+    /// Row-major XYZ → camera RGB, when the camera is calibrated.
+    public let xyzToCamera: [Double]?
+    /// LibRaw orientation code: 0, 3 (180°), 5 (90° CCW) or 6 (90° CW).
+    public let orientation: Int
+    /// DNG BaselineExposure, in stops.
+    public let baselineExposure: Double
+    public let info: ImageInfo
+    /// The file's own noise calibration (DNG NoiseProfile), when it has one.
+    public var noiseProfile: NoiseModel?
+    /// The file's gain maps (DNG OpcodeList2), usually lens shading, applied before demosaicing.
+    public var gainMaps: [GainMap] = []
+    /// The file's DNG colour calibrations, interpolated by white balance when rendering.
+    public var dngColor: DNGColorCalibration?
+    /// The DNG's embedded camera profile tables and tone curve, when it has any.
+    public var dngProfile: DNGProfile?
+    /// The lens correction the file carries (DNG opcodes, Sony's tags), EXIF-oriented.
+    public var lensCorrection: LensCorrection?
+    /// Row and column offsets from the optical-black margins, when they show banding.
+    public var banding: BandingCorrection?
+
+    public init(
+        width: Int,
+        height: Int,
+        layout: Layout,
+        samples: [UInt16],
+        blackLevels: [Float],
+        whiteLevel: Float,
+        asShotMultipliers: SIMD3<Double>,
+        cameraToSRGB: [Double],
+        xyzToCamera: [Double]?,
+        orientation: Int,
+        baselineExposure: Double,
+        info: ImageInfo,
+    ) {
+        self.width = width
+        self.height = height
+        self.layout = layout
+        self.samples = samples
+        self.blackLevels = blackLevels
+        self.whiteLevel = whiteLevel
+        self.asShotMultipliers = asShotMultipliers
+        self.cameraToSRGB = cameraToSRGB
+        self.xyzToCamera = xyzToCamera
+        self.orientation = orientation
+        self.baselineExposure = baselineExposure
+        self.info = info
+    }
+
+    /// Sensor noise in normalised units: the file's own profile, else its camera's calibrated one
+    /// at its ISO, else measured from the image (DN-01).
+    public var noise: NoiseModel {
+        noise(profiles: .bundled)
+    }
+
+    /// A raw far cleaner than its camera's profile says has had noise reduction in the camera (or
+    /// the profile isn't this camera's): the measurement wins. Measurements read too noisy when
+    /// anything (texture, compression) adds variance, never too clean.
+    public func noise(profiles: NoiseProfileCatalog) -> NoiseModel {
+        if let noiseProfile {
+            return noiseProfile
+        }
+        let measured = NoiseEstimator.estimate(self)
+        if let profiled = profiles.model(for: info) {
+            if let measured, measured.a.y < profiled.a.y * 0.4 {
+                return measured
+            }
+            return profiled
+        }
+        return measured ?? .quantization
+    }
+
+    public var isRaw: Bool {
+        if case .linearSRGBHalf = layout {
+            return false
+        }
+        return true
+    }
+
+    /// Size after orientation.
+    public var orientedSize: PixelSize {
+        orientation == 5 || orientation == 6
+            ? PixelSize(width: height, height: width)
+            : PixelSize(width: width, height: height)
+    }
+}
+
+public enum ImageDecoder {
+    /// Decodes a raw or bitmap file.
+    public static func decode(_ url: URL) throws -> DecodedImage {
+        if SupportedFormats.isRaw(url) {
+            return try RawDecoder.decode(url)
+        }
+        return try BitmapDecoder.decode(url)
+    }
+
+    /// Decodes a file from its bytes, `url` naming it (for its type and the photo's info): how
+    /// the decode service works, since it has no access to the file system.
+    public static func decode(_ data: Data, url: URL) throws -> DecodedImage {
+        if SupportedFormats.isRaw(url) {
+            return try RawDecoder.decode(data, url: url)
+        }
+        return try BitmapDecoder.decode(data, url: url)
+    }
+}
