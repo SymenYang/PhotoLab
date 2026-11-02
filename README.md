@@ -1,5 +1,7 @@
 # PhotoLab
 
+简体中文 | [English](README.en.md)
+
 PhotoLab 是面向 macOS 的本地照片与视频管理、选片和编辑工具，使用 SwiftUI 构建界面，SQLite 保存图录。素材可以位于本地磁盘或已挂载的网络共享目录。
 
 ## 功能
