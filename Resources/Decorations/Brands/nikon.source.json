@@ -1,0 +1,86 @@
+{
+  "brand": "nikon",
+  "file": "nikon.svg",
+  "source": "https://commons.wikimedia.org/wiki/File:Nikon_Logo.svg",
+  "download": "https://upload.wikimedia.org/wikipedia/commons/f/f3/Nikon_Logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+  "retrieved": "2026-10-30",
+  "sha256": "fb502fb4df3873efd1c0078fd7c2aaee63d5247634d9ac4c80094dae06ae5fd0",
+  "metadata": {
+    "DateTime": {
+      "value": "2023-01-16 13:24:30",
+      "source": "mediawiki-metadata",
+      "hidden": ""
+    },
+    "ObjectName": {
+      "value": "Nikon Logo",
+      "source": "mediawiki-metadata"
+    },
+    "CommonsMetadataExtension": {
+      "value": 1.2,
+      "source": "extension",
+      "hidden": ""
+    },
+    "Categories": {
+      "value": "Yusaku Kamekura|With trademark|PD textlogo|SVG text logos|Black, white, yellow logos|Yellow square logos|5 letter alphabet logos of Japan|Valid SVG created with Other tools:Text logos|Black alphabet logos of Japan|TOO-Japan|TOO-United States|SVG black text logos|SVG logos of manufacturing companies of Japan|Striped logos|Nikon logos|Black letter logos with yellow background",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "Assessments": {
+      "value": "",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "ImageDescription": {
+      "value": "Nikon Corporation logo",
+      "source": "commons-desc-page"
+    },
+    "DateTimeOriginal": {
+      "value": "2003",
+      "source": "commons-desc-page"
+    },
+    "Credit": {
+      "value": "<a rel=\"nofollow\" class=\"external free\" href=\"https://www.nikon-image.com/common2/img/mod-header/logo_01.svg\">https://www.nikon-image.com/common2/img/mod-header/logo_01.svg</a>",
+      "source": "commons-desc-page"
+    },
+    "Artist": {
+      "value": "Nikon Corporation",
+      "source": "commons-desc-page"
+    },
+    "Permission": {
+      "value": "Ruled as below the threshold of originality by the U.S. Copyright Office.<a rel=\"nofollow\" class=\"external autonumber\" href=\"https://www.copyright.gov/rulings-filings/review-board/docs/nikon-brand-logo.pdf\">[1]</a>",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "LicenseShortName": {
+      "value": "Public domain",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "UsageTerms": {
+      "value": "Public domain",
+      "source": "commons-desc-page"
+    },
+    "AttributionRequired": {
+      "value": "false",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Copyrighted": {
+      "value": "False",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Restrictions": {
+      "value": "trademarked",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "License": {
+      "value": "pd",
+      "source": "commons-templates",
+      "hidden": ""
+    }
+  },
+  "originalSHA256": "449bab29e259c46b7264ed19886e5a0e2ef567250d01163c8e2cd1bbce486c53",
+  "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+}

@@ -1,0 +1,73 @@
+PhotoLab Frames & Stickers
+
+Paper001_Color.jpg: ambientCG Paper 001, Lennart Demes.
+Source: https://ambientcg.com/view?id=Paper001
+License: CC0 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+https://docs.ambientcg.com/license/
+Downloaded 2026-10-30 from Paper001_1K-JPG.zip; color map only, unchanged.
+
+The 12 SVG stickers are original PhotoLab artwork, dedicated to CC0 1.0.
+Frame layouts are original PhotoLab designs inspired by photographic presentation conventions.
+Typography uses locally available macOS fonts; no font files are redistributed.
+See manifest.json for sources, licenses and checksums.
+
+Camera brand logos
+
+Bundled SVG marks identify the camera that captured a photo. These are separate
+from PhotoLab's original CC0 stickers. Marks remain the property of their owners;
+no affiliation, endorsement or trademark license is implied.
+
+Twelve Commons source pages classify their simple text/geometric logo artwork
+as public domain (PD-textlogo); this is a source-reported copyright status, not
+a grant of trademark rights. Individual original author/credit statements,
+source URLs, retrieval dates, original and packaged checksums, and processing
+notes are retained in Brands/*.source.json and manifest.json.
+
+OM SYSTEM: the original white SVG comes directly from the official brand site.
+No open-content license is stated. It is a proprietary trademark asset, not CC0
+or a Commons PD-textlogo asset. Official terms:
+https://www.om-digitalsolutions.com/en/common/terms_of_use_en.html
+
+Brands/canon.svg
+  https://commons.wikimedia.org/wiki/File:Canon_wordmark.svg
+Brands/dji.svg
+  https://commons.wikimedia.org/wiki/File:DJI_Innovations_logo.svg
+Brands/fujifilm.svg
+  https://commons.wikimedia.org/wiki/File:Fujifilm_logo.svg
+Brands/hasselblad.svg
+  https://commons.wikimedia.org/wiki/File:Hasselblad_logo.svg
+Brands/leica.svg
+  https://commons.wikimedia.org/wiki/File:Leica_Camera.svg
+Brands/nikon.svg
+  https://commons.wikimedia.org/wiki/File:Nikon_Logo.svg
+Brands/olympus.svg
+  https://commons.wikimedia.org/wiki/File:Olympus_Corporation_logo.svg
+Brands/om-system.svg
+  https://omsystem.com/en/
+Brands/panasonic.svg
+  https://commons.wikimedia.org/wiki/File:Panasonic_logo_(Blue).svg
+Brands/pentax.svg
+  https://commons.wikimedia.org/wiki/File:Pentax_Logo.svg
+Brands/ricoh.svg
+  https://commons.wikimedia.org/wiki/File:Ricoh_logo_2005.svg
+Brands/sigma.svg
+  https://commons.wikimedia.org/wiki/File:Sigma%27s_new_updated_logo_revealed,_February_2025.svg
+Brands/sony.svg
+  https://commons.wikimedia.org/wiki/File:Sony_logo.svg
+
+Transparent sticker variants
+
+Brands/Variants contains 45 SVG assets: original, black and white variants for
+13 camera brands, plus Hasselblad's H symbol and Leica's separate script mark.
+No rectangular background plates are drawn. Nikon's yellow square/rays are
+removed in these sticker variants. Leica's original red circular badge remains
+a badge; its black/white versions and separate script mark have no circle.
+These are locally prepared display variants, not claims of official brand
+color guidelines. The original source artwork remains in Brands/*.svg.
+
+Hasselblad H symbol: vector transcription of the straight-edged polygon from
+the official Phocus resource HLogo_Nobackground.png, not an official SVG release.
+Source: https://www.hasselblad.com/phocus/
+The reference checksum and processing record are in hasselblad-symbol.source.json.
+No open-content license is stated; this is a proprietary brand mark, not CC0.

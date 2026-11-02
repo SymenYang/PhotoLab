@@ -1,0 +1,81 @@
+{
+  "brand": "leica",
+  "file": "leica.svg",
+  "source": "https://commons.wikimedia.org/wiki/File:Leica_Camera.svg",
+  "download": "https://upload.wikimedia.org/wikipedia/commons/8/8e/Leica_Camera.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+  "retrieved": "2026-10-30",
+  "sha256": "d5eaff75c490fe7169255f21c801eb4578c3d8042b35079f685af776f87b52a8",
+  "metadata": {
+    "DateTime": {
+      "value": "2020-03-04 16:46:35",
+      "source": "mediawiki-metadata",
+      "hidden": ""
+    },
+    "ObjectName": {
+      "value": "Leica Camera",
+      "source": "mediawiki-metadata"
+    },
+    "CommonsMetadataExtension": {
+      "value": 1.2,
+      "source": "extension",
+      "hidden": ""
+    },
+    "Categories": {
+      "value": "SVG logos of companies of Germany|With trademark|PD textlogo|SVG text logos|Unknown date|Logos of companies based in Hesse|Red circle logos|Cursive logos|Text logos with underlines|Leica logos",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "Assessments": {
+      "value": "",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "ImageDescription": {
+      "value": "Logo for Leica Camera",
+      "source": "commons-desc-page"
+    },
+    "DateTimeOriginal": {
+      "value": "Unknown date",
+      "source": "commons-desc-page"
+    },
+    "Credit": {
+      "value": "Modified from <a rel=\"nofollow\" class=\"external text\" href=\"http://www.company7.com/library/leica/leicaduo.pdf\">this</a> brochure (dated 2002).",
+      "source": "commons-desc-page"
+    },
+    "Artist": {
+      "value": "Leica Camera",
+      "source": "commons-desc-page"
+    },
+    "LicenseShortName": {
+      "value": "Public domain",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "UsageTerms": {
+      "value": "Public domain",
+      "source": "commons-desc-page"
+    },
+    "AttributionRequired": {
+      "value": "false",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Copyrighted": {
+      "value": "False",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Restrictions": {
+      "value": "trademarked",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "License": {
+      "value": "pd",
+      "source": "commons-templates",
+      "hidden": ""
+    }
+  },
+  "originalSHA256": "6f03a57db7b98ffaee1c67d940b415340aa65c115c44adf6a3864e17c4cb42d5",
+  "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+}

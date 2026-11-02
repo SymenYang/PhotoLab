@@ -1,0 +1,81 @@
+{
+  "brand": "sony",
+  "file": "sony.svg",
+  "source": "https://commons.wikimedia.org/wiki/File:Sony_logo.svg",
+  "download": "https://upload.wikimedia.org/wikipedia/commons/c/ca/Sony_logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+  "retrieved": "2026-10-30",
+  "sha256": "5ff49bf7e3698ef4faad8d7cf2afbf31725e2fb04474de48abaf52ca7e4bd17d",
+  "metadata": {
+    "DateTime": {
+      "value": "2025-06-19 16:53:35",
+      "source": "mediawiki-metadata",
+      "hidden": ""
+    },
+    "ObjectName": {
+      "value": "Sony logo",
+      "source": "mediawiki-metadata"
+    },
+    "CommonsMetadataExtension": {
+      "value": 1.2,
+      "source": "extension",
+      "hidden": ""
+    },
+    "Categories": {
+      "value": "With trademark|Images with annotations|PD textlogo|SVG text logos|4 letter alphabet logos|Black alphabet logos of Japan|TOO-Japan|SVG black logos|Serif logos|SVG created also with Inkscape|SVG logos of Sony",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "Assessments": {
+      "value": "",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "ImageDescription": {
+      "value": "Wordmark of <a rel=\"nofollow\" class=\"external text\" href=\"http://www.sony.net/\">Sony</a>, in a modified version of <a href=\"https://en.wikipedia.org/wiki/en:Clarendon_(typeface)\" class=\"extiw\" title=\"w:en:Clarendon (typeface)\">Clarendon</a>",
+      "source": "commons-desc-page"
+    },
+    "DateTimeOriginal": {
+      "value": "1973",
+      "source": "commons-desc-page"
+    },
+    "Credit": {
+      "value": "Sonyrtyyh Group Corporation",
+      "source": "commons-desc-page"
+    },
+    "Artist": {
+      "value": "Yasuo Kuroki, Sony",
+      "source": "commons-desc-page"
+    },
+    "LicenseShortName": {
+      "value": "Public domain",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "UsageTerms": {
+      "value": "Public domain",
+      "source": "commons-desc-page"
+    },
+    "AttributionRequired": {
+      "value": "false",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Copyrighted": {
+      "value": "False",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Restrictions": {
+      "value": "trademarked",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "License": {
+      "value": "pd",
+      "source": "commons-templates",
+      "hidden": ""
+    }
+  },
+  "originalSHA256": "f6191bc69f8df259c86a13dc9582ba9ed2e0101d4452ba3f1d33ec8e907ddda0",
+  "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+}

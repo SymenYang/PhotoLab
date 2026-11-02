@@ -299,12 +299,32 @@ final class ImageSession: @unchecked Sendable {
 
     /// Per-channel gains that move the as-shot balance to the requested white balance.
     func whiteBalanceRatio(for recipe: EditRecipe) -> SIMD3<Double> {
-        guard isRaw, recipe.whiteBalanceMode != .asShot, let colorModel else { return SIMD3(1, 1, 1) }
+        guard recipe.whiteBalanceMode != .asShot else { return SIMD3(1, 1, 1) }
+        if !isRaw {
+            // PhotoLab grades rendered RGB, including neutral RAW developments. RGB
+            // has no camera illuminant: 5500K / 0 is the neutral editing reference.
+            let model = Self.rgbWhiteBalanceModel
+            let reference = model.multipliers(for: WhiteBalanceValue(temperature: 5500, tint: 0))
+            let target = model.multipliers(for: WhiteBalanceValue(temperature: recipe[.temperature], tint: recipe[.tint]))
+            return simd_clamp(target / reference, SIMD3(repeating: 0.05), SIMD3(repeating: 20))
+        }
+        guard let colorModel else { return SIMD3(1, 1, 1) }
         let target = colorModel.multipliers(for: WhiteBalanceValue(
             temperature: recipe[.temperature],
             tint: recipe[.tint],
         ))
         return target / asShotMultipliers
+    }
+
+    static let rgbWhiteBalanceModel: CameraColorModel = {
+        let m = RGBPrimaries.sRGB.fromXYZ
+        return CameraColorModel(xyzToCameraRowMajor: [m[0, 0], m[1, 0], m[2, 0], m[0, 1], m[1, 1], m[2, 1], m[0, 2], m[1, 2], m[2, 2]])!
+    }()
+
+    static func relativeRGBWhiteBalance(_ correction: WhiteBalanceValue) -> WhiteBalanceValue {
+        let model = rgbWhiteBalanceModel
+        let reference = model.multipliers(for: WhiteBalanceValue(temperature: 5500, tint: 0))
+        return model.whiteBalance(forMultipliers: reference * model.multipliers(for: correction))
     }
 
     /// Balanced camera RGB to linear Rec. 2020 for the recipe's white balance: DNG calibrations

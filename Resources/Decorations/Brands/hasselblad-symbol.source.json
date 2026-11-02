@@ -1,0 +1,10 @@
+{
+  "brand": "hasselblad-symbol",
+  "file": "hasselblad-symbol.svg",
+  "source": "https://www.hasselblad.com/phocus/",
+  "reference": "Official Phocus.app/Contents/Resources/HLogo_Nobackground.png (1080 x 1080); vector transcription of the H polygon, not an official SVG release",
+  "referenceSHA256": "4315560d7280426cecc058a0228fa0de21b786e7ed1ee87bfcbf87fd4b58ae21",
+  "license": "Proprietary brand mark; no open-content license stated",
+  "retrieved": "2026-10-30",
+  "sha256": "73802f2a685ead6c66f487ac56076de3513e40ad85560c92008d8e24c2d8fa3d"
+}

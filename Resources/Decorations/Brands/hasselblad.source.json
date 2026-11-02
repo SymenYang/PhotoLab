@@ -1,0 +1,81 @@
+{
+  "brand": "hasselblad",
+  "file": "hasselblad.svg",
+  "source": "https://commons.wikimedia.org/wiki/File:Hasselblad_logo.svg",
+  "download": "https://upload.wikimedia.org/wikipedia/commons/d/dd/Hasselblad_logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+  "retrieved": "2026-10-30",
+  "sha256": "cf2423617cca84df6ac3980bb2b396733d903c49561536019abb0ecb3f54a2d3",
+  "metadata": {
+    "DateTime": {
+      "value": "2018-08-06 16:37:49",
+      "source": "mediawiki-metadata",
+      "hidden": ""
+    },
+    "ObjectName": {
+      "value": "Hasselblad logo",
+      "source": "mediawiki-metadata"
+    },
+    "CommonsMetadataExtension": {
+      "value": 1.2,
+      "source": "extension",
+      "hidden": ""
+    },
+    "Categories": {
+      "value": "With trademark|PD textlogo|SVG text logos|SVG logos of companies of Sweden|Valid SVG created with Other tools:Text logos|Hasselblad logos",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "Assessments": {
+      "value": "",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "ImageDescription": {
+      "value": "The logo of <a href=\"https://en.wikipedia.org/wiki/Hasselblad\" class=\"extiw\" title=\"w:Hasselblad\">Hasselblad</a>.",
+      "source": "commons-desc-page"
+    },
+    "DateTimeOriginal": {
+      "value": "Upload: 6 Aug 2018",
+      "source": "commons-desc-page"
+    },
+    "Credit": {
+      "value": "<a rel=\"nofollow\" class=\"external free\" href=\"https://cdn.hasselblad.com/c408a240-46a4-4a09-89b2-e5d2d8ca27d0_en_hk7_h6d400c_pressrelease.pdf\">https://cdn.hasselblad.com/c408a240-46a4-4a09-89b2-e5d2d8ca27d0_en_hk7_h6d400c_pressrelease.pdf</a>",
+      "source": "commons-desc-page"
+    },
+    "Artist": {
+      "value": "Victor Hasselblad AB",
+      "source": "commons-desc-page"
+    },
+    "LicenseShortName": {
+      "value": "Public domain",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "UsageTerms": {
+      "value": "Public domain",
+      "source": "commons-desc-page"
+    },
+    "AttributionRequired": {
+      "value": "false",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Copyrighted": {
+      "value": "False",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Restrictions": {
+      "value": "trademarked",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "License": {
+      "value": "pd",
+      "source": "commons-templates",
+      "hidden": ""
+    }
+  },
+  "originalSHA256": "e5e6db04ea5b880d6ce89235623e508e9286248893173f7e189eb49be402c2cd",
+  "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+}

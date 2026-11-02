@@ -4,14 +4,15 @@ import AppKit
 import SwiftUI
 
 @main struct EditorIntegration {
-    @MainActor static func wait(_ ready: () -> Bool) async throws {
+    @MainActor static func wait(_ ready: () -> Bool, line: UInt = #line) async throws {
         let deadline = Date().addingTimeInterval(40)
         while !ready() {
-            if Date() > deadline { throw CatalogError(message: "Editor integration timeout") }
+            if Date() > deadline { throw CatalogError(message: "Editor integration timeout at line \(line)") }
             try await Task.sleep(for: .milliseconds(20))
         }
     }
     @MainActor static func main() async throws {
+        setbuf(stdout, nil)
         if CommandLine.arguments.contains("--preview-benchmark") {
             let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             let session = PhotoEditSession(source: root.appendingPathComponent("test_photo/B0001166.HEIC"))
@@ -60,8 +61,13 @@ import SwiftUI
         }
         let editor = PhotoEditorModel()
         var refreshes = 0
-        editor.onChange = { refreshes += 1 }
+        editor.onCommit = { id in
+            guard id == "one" || id == "two" || id == "raw" else { fatalError("Commit notified the wrong photo") }
+            refreshes += 1
+        }
         let items = [EditablePhoto(id: "one", name: "one", sources: [first], rotation: 0), EditablePhoto(id: "two", name: "two", sources: [second], rotation: 0)]
+        let initialFirst = try Data(contentsOf: PhotoEditStore.sidecar(first))
+        let initialSecond = try Data(contentsOf: PhotoEditStore.sidecar(second))
         // Closing/reopening before async source discovery finishes must not publish stale state.
         editor.open(items, selectedID: "two")
         editor.close()
@@ -177,10 +183,11 @@ import SwiftUI
         guard editor.parameters.exposure == 0 else { throw CatalogError(message: "Undo did not restore original") }
         editor.redo()
         guard editor.parameters.exposure == 0.9 else { throw CatalogError(message: "Redo failed") }
-        try await wait { !editor.unsaved && !editor.saving }
-        guard try PhotoEditStore.read(first)?.document.adjustments.exposure == 0.9 else { throw CatalogError(message: "Autosave did not persist recipe") }
+        try await Task.sleep(for: .milliseconds(1300))
+        guard editor.unsaved, !editor.saving, refreshes == 0,
+              try Data(contentsOf: PhotoEditStore.sidecar(first)) == initialFirst else { throw CatalogError(message: "Draft changed disk or scheduled analysis before completion") }
         editor.parameters.saturation = 0.6
-        // Complete while an autosave is pending, then switch photo.
+        // Explicitly save before switching; only the committed photo is invalidated.
         editor.complete(next: 1)
         try await wait { editor.index == 1 && editor.canEdit && !editor.finishing && !editor.rendering }
         guard editor.parameters == PhotoAdjustments(), editor.undoValues.isEmpty,
@@ -188,10 +195,40 @@ import SwiftUI
               saved.document.tiffBytes > 0 else { throw CatalogError(message: "Complete/switch lost parameters or inherited previous photo state") }
         editor.complete()
         try await wait { !editor.isPresented }
-        guard try PhotoEditStore.read(second) == nil else { throw CatalogError(message: "Unedited photo acquired sidecar") }
+        guard refreshes == 1, try Data(contentsOf: PhotoEditStore.sidecar(second)) == initialSecond else { throw CatalogError(message: "Unchanged completion rewrote disk or scheduled analysis") }
         editor.open(items, selectedID: "one")
         try await wait { editor.canEdit && !editor.rendering && editor.image != nil }
         guard editor.parameters.exposure == 0.9 && editor.parameters.saturation == 0.6 else { throw CatalogError(message: "Reopen lost saved adjustments") }
+        let committedBytes = try Data(contentsOf: PhotoEditStore.sidecar(first))
+        editor.parameters.exposure = -0.5
+        editor.updateDecoration { $0.style = .gallery; $0.signature = "Discard me" }
+        editor.tab = "crop"; try await wait { !editor.rendering }
+        editor.displayCrop = CGRect(x: 0.1, y: 0.1, width: 0.7, height: 0.7)
+        try await Task.sleep(for: .milliseconds(1300))
+        guard editor.unsaved, refreshes == 1, try Data(contentsOf: PhotoEditStore.sidecar(first)) == committedBytes else { throw CatalogError(message: "Re-edit overwrote the saved grade before completion") }
+        editor.tab = "ai"
+        editor.parameters.exposure = -0.8 // Close with color work still pending.
+        editor.close()
+        try await Task.sleep(for:.milliseconds(300))
+        guard editor.image == nil, !editor.loading, !editor.rendering, !editor.isPresented,
+              refreshes == 1, try Data(contentsOf:PhotoEditStore.sidecar(first)) == committedBytes else {
+            throw CatalogError(message:"Discard published late rendering or changed saved state")
+        }
+        editor.open(items, selectedID: "one")
+        try await wait { editor.canEdit && !editor.rendering && editor.image != nil }
+        guard editor.parameters == saved.document.adjustments, editor.cropDraft == nil, refreshes == 1 else { throw CatalogError(message: "Close retained discarded grade, decoration or crop draft") }
+        editor.parameters.exposure = 0.1; editor.undo()
+        editor.complete(); try await wait { !editor.isPresented }
+        guard refreshes == 1, try Data(contentsOf: PhotoEditStore.sidecar(first)) == committedBytes else { throw CatalogError(message: "Undo-to-baseline completion changed revision or scheduled analysis") }
+        editor.open(items, selectedID: "one")
+        try await wait { editor.canEdit && !editor.rendering && editor.image != nil }
+        editor.parameters.exposure = -1
+        editor.discardAndSwitch(next: 1)
+        try await wait { editor.index == 1 && editor.canEdit && !editor.rendering }
+        guard try Data(contentsOf: PhotoEditStore.sidecar(first)) == committedBytes, refreshes == 1 else { throw CatalogError(message: "Discard-and-switch saved draft") }
+        editor.discardAndSwitch(next: 0)
+        try await wait { editor.index == 0 && editor.canEdit && !editor.rendering }
+        print("PASS drafts do not write or refresh; close preserves prior grade; undo/no-op completion and discard navigation do not refresh")
         editor.showOriginal = true
         try await wait { !editor.rendering }
         guard editor.parameters.exposure == 0.9 else { throw CatalogError(message: "Original comparison modified recipe") }
@@ -204,22 +241,29 @@ import SwiftUI
         guard editor.isPresented && editor.unsaved && editor.parameters.exposure == 0.2,
               try PhotoEditStore.read(first)?.document.adjustments.exposure == 1.5 else { throw CatalogError(message: "Conflict failed to retain user work") }
         editor.close()
-        guard refreshes > 0 else { throw CatalogError(message: "Browser never refreshed") }
-        print("PASS editor autosave, grouped undo/redo, pending-save completion, navigation, reopen, compare, conflict retention")
+        guard refreshes == 1 else { throw CatalogError(message: "Failed save or closing scheduled analysis") }
+        print("PASS explicit completion refreshes once, grouped undo/redo, navigation, reopen, compare, conflict retention")
         editor.open(items, selectedID: "one")
         try await wait { editor.canEdit && !editor.rendering && editor.image != nil }
+        let beforeReset = try Data(contentsOf: PhotoEditStore.sidecar(first))
         editor.resetAdjustments()
-        try await wait { !editor.unsaved && !editor.saving }
-        guard try PhotoEditStore.read(first) == nil, PhotoEditStore.preferredSource([first,second]) == nil else { throw CatalogError(message: "Reset retained sidecar/preference") }
+        try await Task.sleep(for: .milliseconds(1100))
+        guard editor.unsaved, try Data(contentsOf: PhotoEditStore.sidecar(first)) == beforeReset else { throw CatalogError(message: "Reset changed the saved version before completion") }
+        editor.complete(); try await wait { !editor.isPresented }
+        guard try PhotoEditStore.read(first) == nil else { throw CatalogError(message: "Completed reset retained sidecar") }
+        let afterResetRefreshes = refreshes
+        editor.open(items, selectedID: "one")
+        try await wait { editor.canEdit && !editor.rendering && editor.image != nil }
         editor.parameters.exposure = 0.4
-        try await wait { !editor.unsaved && !editor.saving }
-        guard try PhotoEditStore.read(first) != nil else { throw CatalogError(message: "Editing after reset did not recreate sidecar") }
-        editor.undo()
-        try await wait { !editor.unsaved && !editor.saving }
-        guard try PhotoEditStore.read(first) == nil else { throw CatalogError(message: "Undo-all retained sidecar") }
-        editor.complete()
-        try await wait { !editor.isPresented }
-        print("PASS reset/undo removes neutral sidecars, clears format preference, and supports re-editing")
+        try await Task.sleep(for: .milliseconds(1100))
+        editor.close()
+        guard try PhotoEditStore.read(first) == nil, refreshes == afterResetRefreshes else { throw CatalogError(message: "Closing a fresh edit created a sidecar or refreshed analysis") }
+        editor.open(items, selectedID: "one")
+        try await wait { editor.canEdit && !editor.rendering && editor.image != nil }
+        editor.parameters.exposure = 0.4; editor.undo()
+        editor.complete(); try await wait { !editor.isPresented }
+        guard try PhotoEditStore.read(first) == nil, refreshes == afterResetRefreshes else { throw CatalogError(message: "Undo-all on a fresh photo wrote a sidecar or refreshed analysis") }
+        print("PASS reset saves only on completion; fresh close and undo-all preserve absence of sidecar")
         if CommandLine.arguments.count > 2 {
             let raw = temp.appendingPathComponent("raw.ARW")
             try FileManager.default.copyItem(at: URL(fileURLWithPath: CommandLine.arguments[2]), to: raw)
@@ -266,6 +310,8 @@ import SwiftUI
         guard small.size == large.size, max(small.representations[0].pixelsWide, small.representations[0].pixelsHigh) <= 512,
               stats.opens == 1, stats.renders == 2 else { throw CatalogError(message: "Preview dimensions/session reuse failed: \(small.size), \(large.size), bitmap \(small.representations[0].pixelsWide)x\(small.representations[0].pixelsHigh), stats \(stats)") }
         let editor = PhotoEditorModel(), items = [EditablePhoto(id: "color", name: "color", sources: [source], rotation: 0)]
+        var commits = 0
+        editor.onCommit = { _ in commits += 1 }
         editor.open(items, selectedID: "color")
         try await wait { editor.canEdit && !editor.rendering && editor.image != nil }
         guard editor.tab == "ai", editor.parameters.redlamp == .neutral, !editor.unsaved else { throw CatalogError(message: "New editor does not default to neutral AI tab") }
@@ -328,7 +374,7 @@ import SwiftUI
         guard editor.undoValues.count == 1 else { throw CatalogError(message: "Redlamp slider undo not grouped") }
         editor.undo(); guard editor.parameters.redlamp == .neutral else { throw CatalogError(message: "Redlamp undo failed") }
         editor.redo()
-        try await wait { !editor.rendering && !editor.unsaved && !editor.saving }
+        try await wait { !editor.rendering }
         editor.updatePreviewSize(512)
         try await wait { !editor.rendering }
         guard max(editor.previewPixels.width, editor.previewPixels.height) <= 512 else { throw CatalogError(message: "Editor ignored preview size") }
@@ -337,17 +383,14 @@ import SwiftUI
         editor.displayCrop = CGRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5)
         editor.applyCrop(); try await wait { !editor.rendering }
         let crop = editor.parameters
-        var config = try ColorRuntime.configuration()
-        config["colorWorker"] = FileManager.default.currentDirectoryPath + "/Tests/color_worker_fixture.py"
-        let configURL = directory.appendingPathComponent("config.json")
-        try JSONEncoder().encode(config).write(to: configURL)
-        setenv("PHOTOLAB_AI_CONFIG", configURL.path, 1)
         editor.colorPrompt = "fixture"
         editor.startAI(); try await wait { !editor.aiRunning && !editor.rendering }
         guard editor.aiError == nil, editor.parameters.redlamp?.values["basic.exposure"] == 0.3,
               editor.parameters.cropX == crop.cropX, editor.parameters.cropWidth == crop.cropWidth,
               editor.englishPrompt == "fixture English" else { throw CatalogError(message: "AI application did not replace color and preserve crop: \(editor.aiError ?? "")") }
         let colored = editor.parameters
+        try await Task.sleep(for: .milliseconds(1100))
+        guard editor.unsaved, commits == 0, try PhotoEditStore.read(source) == nil else { throw CatalogError(message: "AI draft saved or invalidated analysis before completion") }
         editor.undo(); guard editor.parameters == crop else { throw CatalogError(message: "AI undo lost previous grade") }
         editor.redo(); guard editor.parameters == colored else { throw CatalogError(message: "AI redo failed") }
         editor.colorPrompt = "fail"; editor.startAI(); try await wait { !editor.aiRunning }
@@ -361,6 +404,14 @@ import SwiftUI
               saved.document.adjustments == colored, saved.document.tiffBytes > 0 else { throw CatalogError(message: "AI grade/crop/cache not persisted") }
         editor.open(items, selectedID: "color"); try await wait { editor.canEdit && !editor.rendering && editor.image != nil }
         guard editor.tab == "ai", editor.parameters == colored else { throw CatalogError(message: "Reopen lost AI parameters") }
+        let savedBytes = try Data(contentsOf: PhotoEditStore.sidecar(source))
+        editor.setColor("basic.exposure", value: 1.4)
+        editor.updateDecoration { $0.style = .galleryDark }
+        try await Task.sleep(for: .milliseconds(1100))
+        editor.close()
+        guard commits == 1, try Data(contentsOf: PhotoEditStore.sidecar(source)) == savedBytes else { throw CatalogError(message: "Closing an AI re-edit overwrote saved grade or refreshed analysis") }
+        editor.open(items, selectedID: "color"); try await wait { editor.canEdit && !editor.rendering && editor.image != nil }
+        guard editor.parameters == colored else { throw CatalogError(message: "Discarded AI/manual edits survived reopen") }
         editor.switchToRedlamp()
         guard editor.parameters.cropWidth == colored.cropWidth, editor.parameters.redlamp == .neutral else { throw CatalogError(message: "Color reset changed crop") }
         editor.resetAdjustments(); editor.complete(); try await wait { !editor.isPresented }

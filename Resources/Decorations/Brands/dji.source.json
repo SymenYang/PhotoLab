@@ -1,0 +1,81 @@
+{
+  "brand": "dji",
+  "file": "dji.svg",
+  "source": "https://commons.wikimedia.org/wiki/File:DJI_Innovations_logo.svg",
+  "download": "https://upload.wikimedia.org/wikipedia/commons/9/9a/DJI_Innovations_logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+  "retrieved": "2026-10-30",
+  "sha256": "0720428233594cba716bfbf82a299bcf4b3c0468170f2a768bf69bec5852e2ba",
+  "metadata": {
+    "DateTime": {
+      "value": "2015-10-28 02:21:00",
+      "source": "mediawiki-metadata",
+      "hidden": ""
+    },
+    "ObjectName": {
+      "value": "DJI Innovations logo",
+      "source": "mediawiki-metadata"
+    },
+    "CommonsMetadataExtension": {
+      "value": 1.2,
+      "source": "extension",
+      "hidden": ""
+    },
+    "Categories": {
+      "value": "SVG logos of companies of China|DJI (company)|With trademark|PD textlogo|SVG text logos|3 letter alphabet logos|Acronym logos (3 letters)|SVG logos of manufacturing companies|Blue logos with transparent background|SVG blue text logos|Three letter combinations (lower case)|SVG logos of electronics manufacturing companies|Logos of companies based in Shenzhen|DJI letter combinations",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "Assessments": {
+      "value": "",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "ImageDescription": {
+      "value": "DJI Innovations logo",
+      "source": "commons-desc-page"
+    },
+    "DateTimeOriginal": {
+      "value": "2015-10-27",
+      "source": "commons-desc-page"
+    },
+    "Credit": {
+      "value": "Extracted from <a rel=\"nofollow\" class=\"external text\" href=\"https://download.dji-innovations.com/downloads/inspire_1/de/Inspire_1_Quick_Start_Guide_de.pdf\">https://download.dji-innovations.com/downloads/inspire_1/de/Inspire_1_Quick_Start_Guide_de.pdf</a>, cleanup with Inkscape and optimised using Scour",
+      "source": "commons-desc-page"
+    },
+    "Artist": {
+      "value": "DJI Innovations",
+      "source": "commons-desc-page"
+    },
+    "LicenseShortName": {
+      "value": "Public domain",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "UsageTerms": {
+      "value": "Public domain",
+      "source": "commons-desc-page"
+    },
+    "AttributionRequired": {
+      "value": "false",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Copyrighted": {
+      "value": "False",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Restrictions": {
+      "value": "trademarked",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "License": {
+      "value": "pd",
+      "source": "commons-templates",
+      "hidden": ""
+    }
+  },
+  "originalSHA256": "dccc86206e06963c557d9d167cf31459b6d3814614cac2db7dd49f09b62acb7e",
+  "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+}

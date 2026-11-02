@@ -781,8 +781,10 @@ public final class RedlampEngine: EditingEngine, @unchecked Sendable {
     // MARK: - Analysis
 
     public func autoWhiteBalance() async -> WhiteBalanceValue? {
-        guard let current = session.withLock({ $0 }), let model = current.colorModel else { return nil }
-        return ImageAnalysis.autoWhiteBalance(session: current, model: model)
+        guard let current = session.withLock({ $0 }) else { return nil }
+        if let model = current.colorModel { return ImageAnalysis.autoWhiteBalance(session: current, model: model) }
+        guard !current.isRaw else { return nil }
+        return ImageSession.relativeRGBWhiteBalance(ImageAnalysis.autoWhiteBalance(session: current, model: ImageSession.rgbWhiteBalanceModel))
     }
 
     public func whiteBalance(sampledAt point: CGPoint) async -> WhiteBalanceValue? {

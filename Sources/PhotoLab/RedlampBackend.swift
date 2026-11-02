@@ -24,13 +24,34 @@ struct RedlampGrade: Codable, Equatable {
     }
     var object: [String: Any] { (try? JSONSerialization.jsonObject(with: settings)) as? [String: Any] ?? [:] }
     var values: [String: Double] { object["values"] as? [String: Double] ?? [:] }
+    var whiteBalance: String { object["whiteBalance"] as? String ?? "asShot" }
+    var blackAndWhite: Bool { object["treatment"] as? String == "blackAndWhite" }
+    static let curveKeys = ["pointCurve", "pointCurveRed", "pointCurveGreen", "pointCurveBlue"]
+    func curve(_ key: String) -> [GradeCurvePoint] {
+        (object[key] as? [[String: Double]])?.compactMap { point in
+            guard let x = point["x"], let y = point["y"] else { return nil }
+            return GradeCurvePoint(x: x, y: y)
+        } ?? [.init(x: 0, y: 0), .init(x: 1, y: 1)]
+    }
     var isNeutral: Bool { self == Self.neutral }
+    mutating func setField(_ key: String, value: Any) throws {
+        var fields = object; fields[key] = value
+        var candidate = self
+        candidate.settings = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
+        try candidate.validate(); self = candidate
+    }
+    mutating func setCurve(_ key: String, points: [GradeCurvePoint]) throws {
+        guard Self.curveKeys.contains(key) else { throw CatalogError(message: "未知曲线通道") }
+        try setField(key, value: points.map { ["x": $0.x, "y": $0.y] })
+    }
     mutating func set(_ key: String, value: Double) throws {
         guard value.isFinite else { throw CatalogError(message: "调色参数不是有效数值") }
         var fields = object, numbers = values
         numbers[key] = value; fields["values"] = numbers
-        settings = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
-        try validate()
+        if key == "wb.temperature" || key == "wb.tint" { fields["whiteBalance"] = "custom" }
+        var candidate = self
+        candidate.settings = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
+        try candidate.validate(); self = candidate
     }
     func validate() throws {
         let fields = try JSONSerialization.jsonObject(with: settings) as? [String: Any]
@@ -39,6 +60,15 @@ struct RedlampGrade: Codable, Equatable {
               Set(fields.keys).isSubset(of: allowed), let numbers = fields["values"] as? [String: Double],
               numbers.values.allSatisfy({ $0.isFinite && abs($0) <= 100_000 }) else {
             throw CatalogError(message: "不支持或损坏的 Redlamp 全局调色参数")
+        }
+        for key in Self.curveKeys where fields[key] != nil {
+            guard let points = fields[key] as? [[String: Double]], (2...256).contains(points.count),
+                  points.allSatisfy({ point in
+                      guard let x = point["x"], let y = point["y"] else { return false }
+                      return x.isFinite && y.isFinite && (0...1).contains(x) && (0...1).contains(y)
+                  }), zip(points, points.dropFirst()).allSatisfy({ $0["x"]! < $1["x"]! }) else {
+                throw CatalogError(message: "曲线坐标必须在 0 至 1 之间，且横坐标不能重叠")
+            }
         }
     }
     static func imported(_ recipe: [String: Any], original: String, result: [String: Any]) throws -> Self {
@@ -53,6 +83,78 @@ struct RedlampGrade: Codable, Equatable {
         try grade.validate()
         return grade
     }
+}
+
+// Defaults and ranges mirror the vendored Redlamp ParameterSpec, including
+// nonzero defaults. Missing recipe values must not appear as zero in the editor.
+struct ManualColorControl: Identifiable {
+    let title: String
+    let key: String
+    var range: ClosedRange<Double> = -100...100
+    var step: Double = 1
+    var defaultValue: Double = 0
+    var id: String { key }
+    static let whiteBalance = [
+        Self(title: "色温 K", key: "wb.temperature", range: 2000...50000, step: 50, defaultValue: 5500),
+        Self(title: "色调 · 绿 / 洋红", key: "wb.tint", range: -150...150),
+    ]
+    static let curveTone = [
+        Self(title: "高光", key: "toneCurve.highlights"), Self(title: "亮调", key: "toneCurve.lights"),
+        Self(title: "暗调", key: "toneCurve.darks"), Self(title: "阴影", key: "toneCurve.shadows"),
+        Self(title: "阴影分界", key: "toneCurve.split.shadows", range: 10...40, defaultValue: 25),
+        Self(title: "中间调分界", key: "toneCurve.split.midtones", range: 30...70, defaultValue: 50),
+        Self(title: "高光分界", key: "toneCurve.split.highlights", range: 60...90, defaultValue: 75),
+    ]
+    static let gradingMix = [
+        Self(title: "混合", key: "grading.blending", range: 0...100, defaultValue: 50),
+        Self(title: "平衡", key: "grading.balance"),
+    ]
+    static func grading(_ band: String) -> [Self] { [
+        Self(title: "色相", key: "grading." + band + ".hue", range: 0...360),
+        Self(title: "饱和度", key: "grading." + band + ".saturation", range: 0...100),
+        Self(title: "明亮度", key: "grading." + band + ".luminance"),
+    ] }
+    static let sharpening = [
+        Self(title: "数量", key: "detail.sharpen.amount", range: 0...150, defaultValue: 40),
+        Self(title: "半径", key: "detail.sharpen.radius", range: 0.5...3, step: 0.1, defaultValue: 1),
+        Self(title: "细节", key: "detail.sharpen.detail", range: 0...100, defaultValue: 25),
+        Self(title: "蒙版", key: "detail.sharpen.masking", range: 0...100),
+    ]
+    static let noise = [
+        Self(title: "明亮度降噪", key: "detail.noise.luminance", range: 0...100),
+        Self(title: "明亮度细节", key: "detail.noise.luminanceDetail", range: 0...100, defaultValue: 50),
+        Self(title: "明亮度对比度", key: "detail.noise.luminanceContrast", range: 0...100),
+        Self(title: "颜色降噪", key: "detail.noise.color", range: 0...100, defaultValue: 25),
+        Self(title: "颜色细节", key: "detail.noise.colorDetail", range: 0...100, defaultValue: 50),
+        Self(title: "颜色平滑度", key: "detail.noise.colorSmoothness", range: 0...100, defaultValue: 50),
+    ]
+    static let vignette = [
+        Self(title: "数量", key: "effects.vignette.amount"),
+        Self(title: "中点", key: "effects.vignette.midpoint", range: 0...100, defaultValue: 50),
+        Self(title: "圆度", key: "effects.vignette.roundness"),
+        Self(title: "羽化", key: "effects.vignette.feather", range: 0...100, defaultValue: 50),
+        Self(title: "高光保护", key: "effects.vignette.highlights", range: 0...100),
+    ]
+    static let grain = [
+        Self(title: "数量", key: "effects.grain.amount", range: 0...100),
+        Self(title: "大小", key: "effects.grain.size", range: 0...100, defaultValue: 25),
+        Self(title: "粗糙度", key: "effects.grain.roughness", range: 0...100, defaultValue: 50),
+    ]
+}
+
+struct GradeCurvePoint: Equatable {
+    var x: Double
+    var y: Double
+}
+
+final class RedlampWorkingBase {
+    let directory: URL
+    let image: URL
+    let sourceSize: CGSize
+    init(directory: URL, image: URL, sourceSize: CGSize) {
+        self.directory = directory; self.image = image; self.sourceSize = sourceSize
+    }
+    deinit { try? FileManager.default.removeItem(at: directory) }
 }
 
 enum ColorRuntime {
@@ -112,11 +214,15 @@ final class NativeColorEngine {
         typealias Destroy = @convention(c) (UnsafeMutableRawPointer) -> Void
         typealias Open = @convention(c) (UnsafeMutableRawPointer, UnsafePointer<CChar>, UnsafeMutablePointer<Int32>, UnsafeMutablePointer<Int32>, UnsafeMutablePointer<CChar>?, Int32) -> Int32
         typealias Render = @convention(c) (UnsafeMutableRawPointer, UnsafePointer<UInt8>, Int32, Int32, Int32, UnsafeMutablePointer<CChar>?, Int32) -> UnsafeMutableRawPointer?
+        typealias Balance = @convention(c) (UnsafeMutableRawPointer, UnsafeMutablePointer<Double>, UnsafeMutablePointer<Double>) -> Void
+        typealias Curve = @convention(c) (UnsafePointer<Double>, Int32, UnsafeMutablePointer<Double>, Int32) -> Void
         let handle: UnsafeMutableRawPointer
         let create: Create
         let destroy: Destroy
         let open: Open
         let render: Render
+        let balance: Balance
+        let curve: Curve
         init() throws {
             let bundled = Bundle.main.privateFrameworksURL?.appendingPathComponent("PhotoLabRedlamp.framework/PhotoLabRedlamp")
             let path: URL
@@ -131,17 +237,22 @@ final class NativeColorEngine {
                 return unsafeBitCast(address, to: Value.self)
             }
             let version = try symbol("photolab_redlamp_abi", (@convention(c) () -> Int32).self)
-            guard version() == 1 else { throw CatalogError(message: "Redlamp 原生接口版本不匹配") }
+            guard version() == 2 else { throw CatalogError(message: "Redlamp 原生接口版本不匹配，请重新构建应用") }
             create = try symbol("photolab_redlamp_create", Create.self)
             destroy = try symbol("photolab_redlamp_destroy", Destroy.self)
             open = try symbol("photolab_redlamp_open", Open.self)
             render = try symbol("photolab_redlamp_render", Render.self)
+            balance = try symbol("photolab_redlamp_white_balance", Balance.self)
+            curve = try symbol("photolab_redlamp_curve_samples", Curve.self)
         }
     }
     private static let library = Result { try Library() }
     private let api: Library
     private let session: UnsafeMutableRawPointer
     private(set) var size = CGSize.zero
+    private(set) var sourceSize = CGSize.zero
+    private var workingBase: RedlampWorkingBase?
+    private(set) var whiteBalance: [String: Double] = ["wb.temperature": 5500, "wb.tint": 0]
     private(set) var opens = 0
     private(set) var previews = 0
     init() throws {
@@ -156,72 +267,107 @@ final class NativeColorEngine {
         let success = source.path.withCString { api.open(session, $0, &width, &height, &error, Int32(error.count)) }
         guard success != 0 else { throw CatalogError(message: String(cString: error)) }
         size = CGSize(width: Int(width), height: Int(height)); opens += 1
+        sourceSize = size
     }
-    func render(_ grade: RedlampGrade, previewLongEdge: Int? = nil) throws -> CGImage {
+    func open(_ base: RedlampWorkingBase) throws {
+        try open(base.image)
+        workingBase = base; sourceSize = base.sourceSize
+    }
+    func render(_ grade: RedlampGrade, previewLongEdge: Int? = nil, sixteenBit: Bool = false) throws -> CGImage {
         try grade.validate()
         var error = [CChar](repeating: 0, count: 4096)
         let pointer = grade.settings.withUnsafeBytes { bytes in
             api.render(session, bytes.bindMemory(to: UInt8.self).baseAddress!, Int32(bytes.count),
                        previewLongEdge.map { Int32(max(1, min(32768, $0))) } ?? 0,
-                       previewLongEdge == nil ? 1 : 0, &error, Int32(error.count))
+                       previewLongEdge == nil || sixteenBit ? 1 : 0, &error, Int32(error.count))
         }
         guard let pointer else { throw CatalogError(message: String(cString: error)) }
+        var temperature = 5500.0, tint = 0.0
+        api.balance(session, &temperature, &tint)
+        whiteBalance = ["wb.temperature": temperature, "wb.tint": tint]
         if previewLongEdge != nil { previews += 1 }
         return Unmanaged<CGImage>.fromOpaque(pointer).takeRetainedValue()
+    }
+    static func curveSamples(_ points: [GradeCurvePoint]) -> [GradeCurvePoint] {
+        guard (2...256).contains(points.count), let api = try? library.get() else { return points }
+        let coordinates = points.flatMap { [$0.x, $0.y] }
+        var samples = [Double](repeating: 0, count: 129)
+        api.curve(coordinates, Int32(points.count), &samples, Int32(samples.count))
+        return samples.enumerated().map { GradeCurvePoint(x: Double($0.offset) / Double(samples.count - 1), y: $0.element) }
     }
 }
 
 enum RedlampBackend {
+    // Protect only the cache. Decoding, disk I/O and Metal never hold this lock, so
+    // a full-size export cannot block AI input preparation or another preview.
     private static let lock = NSLock()
-    private final class WorkingBase {
-        let directory: URL
-        let image: URL
-        init(directory: URL, image: URL) { self.directory = directory; self.image = image }
-        deinit { try? FileManager.default.removeItem(at: directory) }
-    }
-    private static var bases: [String: WorkingBase] = [:]
-    static func workingSource(_ source: URL, directory: URL) throws -> URL {
-        guard Scanner.rawExtensions.contains(source.pathExtension.lowercased()) else { return source }
+    private static var bases: [String: RedlampWorkingBase] = [:]
+    private static var baseOrder: [String] = []
+    static func workingBase(_ source: URL, maxLongEdge: Int? = nil) throws -> RedlampWorkingBase? {
+        guard Scanner.rawExtensions.contains(source.pathExtension.lowercased()) else { return nil }
+        try Task.checkCancellation()
         let identity = try EditSource.read(source)
-        let key = "\(source.path)|\(identity.size)|\(identity.modified)|native-17"
-        if let cached = bases[key] { return cached.image }
+        let edge = maxLongEdge.map { max(1, min(32768, $0)) }
+        let key = "\(source.path)|\(identity.size)|\(identity.modified)|native-17|\(edge ?? 0)"
+        lock.lock()
+        let cached = bases[key]
+        if cached != nil { baseOrder.removeAll { $0 == key }; baseOrder.append(key) }
+        lock.unlock()
+        if let cached { return cached }
         let staging = try ColorRuntime.temporaryDirectory(), base = staging.appendingPathComponent("base.tif")
         do {
             let engine = try NativeColorEngine()
             try engine.open(source)
-            try PhotoEditStore.encode(engine.render(.neutral), to: base, tiff: true)
-        }
-        catch { try? FileManager.default.removeItem(at: staging); throw error }
-        if bases.count >= 2, let oldest = bases.keys.sorted().first { bases.removeValue(forKey: oldest) }
-        bases[key] = WorkingBase(directory: staging, image: base)
-        return base
+            try Task.checkCancellation()
+            let size = engine.size
+            let pixels = try engine.render(.neutral, previewLongEdge: edge, sixteenBit: true)
+            try Task.checkCancellation()
+            try PhotoEditStore.encode(pixels, to: base, tiff: true)
+            try Task.checkCancellation()
+            guard try EditSource.read(source) == identity else { throw CatalogError(message: "RAW 原片在读取时发生变化，请重试") }
+            let result = RedlampWorkingBase(directory: staging, image: base, sourceSize: size)
+            // Full-size TIFFs can be hundreds of MB: retain only during the export.
+            if edge != nil {
+                var evicted: [RedlampWorkingBase] = []
+                lock.lock()
+                if let previous = bases.updateValue(result, forKey: key) { evicted.append(previous) }
+                baseOrder.removeAll { $0 == key }; baseOrder.append(key)
+                while baseOrder.count > 2 {
+                    if let previous = bases.removeValue(forKey: baseOrder.removeFirst()) { evicted.append(previous) }
+                }
+                lock.unlock()
+                withExtendedLifetime(evicted) {}
+            }
+            return result
+        } catch { try? FileManager.default.removeItem(at: staging); throw error }
     }
     static func render(_ source: URL, grade: RedlampGrade) throws -> CIImage {
         try grade.validate()
-        lock.lock(); defer { lock.unlock() }
         try Task.checkCancellation()
-        let directory = try ColorRuntime.temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let input = try workingSource(source, directory: directory)
         let engine = try NativeColorEngine()
-        try engine.open(input)
+        if let base = try workingBase(source) { try engine.open(base) }
+        else { try engine.open(source) }
+        try Task.checkCancellation()
         let image = try engine.render(grade)
+        try Task.checkCancellation()
         guard image.bitsPerComponent == 16 else { throw CatalogError(message: "Redlamp 没有返回有效的16位图像") }
         return CIImage(cgImage: image)
     }
-    static func preparePreview(_ source: URL) throws -> NativeColorEngine {
-        lock.lock(); defer { lock.unlock() }
-        let directory = try ColorRuntime.temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let input = try workingSource(source, directory: directory)
+    static func preparePreview(_ source: URL, maxLongEdge: Int = 2048) throws -> NativeColorEngine {
+        try Task.checkCancellation()
         let engine = try NativeColorEngine()
-        try engine.open(input)
+        if let base = try workingBase(source, maxLongEdge: maxLongEdge) { try engine.open(base) }
+        else { try engine.open(source) }
+        try Task.checkCancellation()
         return engine
     }
     static func modelInput(_ source: URL, directory: URL) throws -> URL {
-        lock.lock(); defer { lock.unlock() }
-        let input = try workingSource(source, directory: directory)
-        guard let image = CIImage(contentsOf: input, options: [.applyOrientationProperty: true]) else {
+        try Task.checkCancellation()
+        // Share the bounded RGB base with the initial editor preview. Never prepare
+        // a full-resolution TIFF just to feed a 1536px image to the model.
+        let base = try workingBase(source, maxLongEdge: 2048)
+        defer { withExtendedLifetime(base) {} }
+        guard let image = CIImage(contentsOf: base?.image ?? source, options: [.applyOrientationProperty: true]) else {
             throw CatalogError(message: "无法准备 AI 输入图像")
         }
         let scale = min(1, 1536 / max(image.extent.width, image.extent.height))
@@ -229,6 +375,7 @@ enum RedlampBackend {
         guard let cg = PhotoEditStore.context.createCGImage(small, from: small.extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
             throw CatalogError(message: "无法生成 sRGB 模型输入")
         }
+        try Task.checkCancellation()
         let output = directory.appendingPathComponent("input.jpg")
         try PhotoEditStore.encode(cg, to: output, tiff: false)
         return output
@@ -265,8 +412,10 @@ enum RedlampBackend {
             throw CatalogError(message: "调色模型没有返回可用的方案")
         }
         let grade = try RedlampGrade.imported(recipe, original: prompt, result: result)
-        progress("正在验证全分辨率 Redlamp 渲染…", grade.englishPrompt ?? "")
-        _ = try render(source, grade: grade)
+        progress("正在验证调色预览…", grade.englishPrompt ?? "")
+        let preview = try preparePreview(source)
+        _ = try preview.render(grade, previewLongEdge: 1536)
+        try Task.checkCancellation()
         return grade
     }
 }

@@ -10,6 +10,7 @@ struct PhotoViewingEntry: Identifiable {
     var rotation: Int
     var rating: Int
     var editSources: [URL] = []
+    var asset: Asset? = nil
 }
 
 @MainActor final class PhotoViewingController: NSObject, ObservableObject, NSWindowDelegate {
@@ -24,6 +25,8 @@ struct PhotoViewingEntry: Identifiable {
     @Published var entries: [PhotoViewingEntry] = []
     @Published var ratingFeedback: String?
     @Published var ratingFeedbackID = UUID()
+    @Published private(set) var screenInsets = EdgeInsets()
+    private(set) var screenPixelEdge = 2560
     private var onRate: ((String, Int) -> Int?)?
     private var onClose: ((String) -> Void)?
     private var onRotate: ((String, Int) -> Int?)?
@@ -41,6 +44,7 @@ struct PhotoViewingEntry: Identifiable {
         index = entries.firstIndex { $0.id == selectedID } ?? 0
         originWindow = NSApp.keyWindow
         guard let screen = originWindow?.screen ?? NSScreen.main else { return }
+        updateScreenInsets(screen)
         previousPresentation = NSApp.presentationOptions
         let window = PhotoViewingWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -56,11 +60,24 @@ struct PhotoViewingEntry: Identifiable {
         let host = NSHostingView(rootView: PhotoViewingContent(controller: self).preferredColorScheme(.dark))
         // A photo's pixel dimensions must never resize the borderless screen window.
         host.sizingOptions = []
+        // Borderless windows cover the entire display, including the camera/menu
+        // strip. Apply NSScreen's safe area explicitly to the photo viewport.
+        host.safeAreaRegions = []
         window.contentView = host
         self.window = window
         NSApp.presentationOptions = [.autoHideDock, .autoHideMenuBar]
         window.setFrame(screen.frame, display: true)
         window.makeKeyAndOrderFront(nil)
+    }
+    private func updateScreenInsets(_ screen: NSScreen) {
+        screenPixelEdge = Int(max(screen.frame.width,screen.frame.height)*screen.backingScaleFactor)
+        let safe = screen.safeAreaInsets
+        screenInsets = EdgeInsets(top: safe.top, leading: safe.left, bottom: safe.bottom, trailing: safe.right)
+    }
+    func windowDidChangeScreen(_ notification: Notification) {
+        guard let window, let screen = window.screen else { return }
+        updateScreenInsets(screen)
+        if window.frame != screen.frame { window.setFrame(screen.frame, display: true) }
     }
     func canMove(_ offset: Int, betweenGroups: Bool = false) -> Bool {
         navigation.target(from: current?.id, offset: offset, withinGroup: !betweenGroups && withinGroup) != nil
@@ -73,6 +90,7 @@ struct PhotoViewingEntry: Identifiable {
     func rotate(_ turns: Int) {
         guard let entry = current, let rotation = onRotate?(entry.id, turns) else { return }
         entries[index].rotation = rotation
+        entries[index].asset?.rotation = rotation
     }
     func rate(_ rating: Int) {
         guard let entry = current, let saved = onRate?(entry.id, rating) else { return }
@@ -115,27 +133,98 @@ final class PhotoViewingWindow: NSWindow {
 
 extension Notification.Name { static let photoViewingZoom = Notification.Name("PhotoViewingZoom") }
 
+// Show the existing shared preview before touching originals. Upgrade only to the
+// visible pixel budget, preserving the logical full-size canvas for pinch/zoom.
+@MainActor final class FocusPhotoModel: ObservableObject {
+    @Published private(set) var image: NSImage?
+    @Published private(set) var error: String?
+    @Published private(set) var hdr = false
+    @Published private(set) var rotation = 0
+    @Published private(set) var loading = false
+    private var generation = UUID()
+    private var entry: PhotoViewingEntry?
+    private var original = false
+    private var loadedDimension = 0
+    private var upgradeTask: Task<Void,Never>?
+    private var pendingDimension = 0
+    typealias Cached = (Asset, Int) async -> Data?
+    typealias Detail = (PhotoViewingEntry, Bool, Int) async -> (image:NSImage?, hdr:Bool, error:String?)
+    private let cached: Cached
+    private let detail: Detail
+    init(cached: @escaping Cached = { await ImageCacheService.shared.existing(asset:$0,dimension:$1) }, detail: @escaping Detail = FocusPhotoModel.detail) {
+        self.cached = cached; self.detail = detail
+    }
+    nonisolated static func detail(_ entry: PhotoViewingEntry, original: Bool, dimension: Int) async -> (image:NSImage?, hdr:Bool, error:String?) {
+        let sources = entry.editSources.isEmpty ? [entry.url] : entry.editSources
+        if !original {
+            let edited = await PhotoEditStore.loadPreview(sources:sources,thumbnail:true,maxDimension:dimension,rotation:entry.rotation,logicalSize:true)
+            guard !Task.isCancelled else { return (nil,false,nil) }
+            if edited.source != nil { return (edited.image,false,edited.error) }
+        }
+        let preferred = original ? try? await PhotoEditStore.findPreferredSource(sources) : nil
+        guard !Task.isCancelled else { return (nil,false,nil) }
+        let source = preferred ?? entry.url
+        let result = await MediaLoader.shared.photo(url:source,raw:Scanner.rawExtensions.contains(source.pathExtension.lowercased()),full:false,hdr:true,maxDimension:CGFloat(dimension),cacheKey:source == entry.url ? entry.cacheKey : nil,logicalSize:true)
+        return (result.image,true,result.error)
+    }
+    func open(_ entry: PhotoViewingEntry, original: Bool, dimension: Int) async {
+        cancel(); let token = generation
+        self.entry = entry; self.original = original
+        image = nil; error = nil; hdr = false; rotation = entry.rotation; loading = true; loadedDimension = 0
+        if !original, let asset = entry.asset {
+            for tier in [2560,1440,960,480] {
+                let data = await cached(asset,tier)
+                guard !Task.isCancelled, token == generation else { return }
+                if let data, let preview = NSImage(data:data) { image = preview; rotation = 0; break }
+            }
+        }
+        guard !Task.isCancelled, token == generation else { return }
+        await load(dimension:max(1280,dimension),token:token)
+    }
+    private func load(dimension: Int, token: UUID) async {
+        guard let entry else { return }
+        let result = await detail(entry,original,dimension)
+        guard !Task.isCancelled, token == generation else { return }
+        if let image = result.image { self.image = image; hdr = result.hdr; rotation = entry.rotation; loadedDimension = dimension }
+        error = result.error; loading = false
+    }
+    func requestResolution(_ edge: Int) {
+        guard image != nil, loadedDimension > 0 else { return }
+        let dimension = min(32768,((max(1280,edge)+511)/512)*512)
+        guard dimension > Int(Double(loadedDimension)*1.15), dimension != pendingDimension else { return }
+        upgradeTask?.cancel(); pendingDimension = dimension
+        let token = generation
+        upgradeTask = Task {
+            do { try await Task.sleep(for:.milliseconds(180)); try Task.checkCancellation() } catch { return }
+            loading = true
+            await load(dimension:dimension,token:token)
+            if token == generation, !Task.isCancelled { pendingDimension = 0 }
+        }
+    }
+    func cancel() { upgradeTask?.cancel(); upgradeTask = nil; pendingDimension = 0; generation = UUID() }
+}
+
 private struct PhotoViewingContent: View {
     @ObservedObject var controller: PhotoViewingController
-    @State private var image: NSImage?
-    @State private var error: String?
+    @StateObject private var photo = FocusPhotoModel()
     @State private var showControls = false
     @State private var showOriginal = false
-    @State private var displayingEdit = false
     @State private var zoomReset = 0
     @State private var zoom = 1.0
     var body: some View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
-            if let image { ZoomImage(image: image, zoom: zoom, hdr: !displayingEdit, resetID: zoomReset, rotation: controller.current?.rotation ?? 0).frame(maxWidth: .infinity, maxHeight: .infinity) }
-            else if let error { Text(error).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            if let image = photo.image { ZoomImage(image: image, zoom: zoom, hdr: photo.hdr, resetID: zoomReset, rotation: photo.rotation, preserveViewport:true, onPreviewSize:photo.requestResolution).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else if let error = photo.error { Text(error).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity) }
             else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
             VStack(spacing: 10) {
             HStack(spacing: 16) {
                 Button { controller.dismiss() } label: { Label("退出观赏", systemImage: "xmark") }.help("Esc 或 F 退出")
                 Text(controller.current?.name ?? "").lineLimit(1)
                 Text(String(repeating: "★", count: controller.current?.rating ?? 0)).foregroundStyle(.yellow).help("1–5 设置评分")
-                if let image { Text("\(Int(image.size.width)) × \(Int(image.size.height))").font(.caption).foregroundStyle(.secondary) }
+                if let image = photo.image { Text("\(Int(image.size.width)) × \(Int(image.size.height))").font(.caption).foregroundStyle(.secondary) }
+                if photo.loading { ProgressView().controlSize(.small).help("正在补充清晰度") }
+                if let error = photo.error, photo.image != nil { Image(systemName:"exclamationmark.triangle").help("显示缓存预览："+error) }
                 Spacer()
                 Button { controller.rotate(-1) } label: { Image(systemName: "rotate.left") }.help("向左旋转 90° · [")
                 Button { controller.rotate(1) } label: { Image(systemName: "rotate.right") }.help("向右旋转 90° · ]")
@@ -178,22 +267,13 @@ private struct PhotoViewingContent: View {
             if key == 29 { zoom = 1; zoomReset += 1 }
             else { zoom = min(8, max(1, zoom * (key == 24 ? 1.25 : 0.8))) }
         }
-        .task(id: "\(controller.current?.id ?? "")|\(showOriginal)") {
-            image = nil; error = nil; zoom = 1; displayingEdit = false
+        .task(id: "\(controller.current?.id ?? "")|\(showOriginal)|\(controller.current?.rotation ?? 0)") {
+            zoom = 1; zoomReset += 1
             guard let entry = controller.current else { return }
-            if !showOriginal {
-                let edited = await PhotoEditStore.loadPreview(sources: entry.editSources.isEmpty ? [entry.url] : entry.editSources, thumbnail: false)
-                guard !Task.isCancelled else { return }
-                if edited.source != nil { displayingEdit = true; image = edited.image; error = edited.error; return }
-            }
-            let preferred: URL?
-            do { preferred = showOriginal ? try await PhotoEditStore.findPreferredSource(entry.editSources) : nil }
-            catch { return }
-            guard !Task.isCancelled else { return }
-            let original = preferred ?? entry.url
-            let result = await MediaLoader.shared.photo(url: original, raw: Scanner.rawExtensions.contains(original.pathExtension.lowercased()), full: true, hdr: true, cacheKey: original == entry.url ? entry.cacheKey : nil)
-            guard !Task.isCancelled else { return }
-            image = result.image; error = result.error
+            await photo.open(entry,original:showOriginal,dimension:controller.screenPixelEdge)
         }
+        .onDisappear { photo.cancel() }
+        .padding(controller.screenInsets)
+        .background(Color.black.ignoresSafeArea())
     }
 }

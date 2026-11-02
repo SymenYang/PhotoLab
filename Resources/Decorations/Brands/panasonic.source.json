@@ -1,0 +1,81 @@
+{
+  "brand": "panasonic",
+  "file": "panasonic.svg",
+  "source": "https://commons.wikimedia.org/wiki/File:Panasonic_logo_(Blue).svg",
+  "download": "https://upload.wikimedia.org/wikipedia/commons/8/8e/Panasonic_logo_%28Blue%29.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+  "retrieved": "2026-10-30",
+  "sha256": "84b58eb5c160a031ca5d359c69909c7917bfff7b8bceed9940f6bf8272836918",
+  "metadata": {
+    "DateTime": {
+      "value": "2016-09-27 05:09:37",
+      "source": "mediawiki-metadata",
+      "hidden": ""
+    },
+    "ObjectName": {
+      "value": "Panasonic logo (Blue)",
+      "source": "mediawiki-metadata"
+    },
+    "CommonsMetadataExtension": {
+      "value": 1.2,
+      "source": "extension",
+      "hidden": ""
+    },
+    "Categories": {
+      "value": "With trademark|PD textlogo|SVG simple text logos|9 letter alphabet logos of Japan|Horizontal logos|Valid SVG created with Adobe Illustrator:Text logos|Blue alphabet logos of Japan|TOO-Japan|SVG logos of manufacturing companies of Japan|Logos using Helvetica|SVG logos of electronics manufacturing companies|Panasonic logos",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "Assessments": {
+      "value": "",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "ImageDescription": {
+      "value": "Panasonic Logo.",
+      "source": "commons-desc-page"
+    },
+    "DateTimeOriginal": {
+      "value": "1971",
+      "source": "commons-desc-page"
+    },
+    "Credit": {
+      "value": "Own work based on: <a href=\"//commons.wikimedia.org/wiki/File:Panasonic_logo.svg\" title=\"File:Panasonic logo.svg\">Panasonic logo.svg</a>",
+      "source": "commons-desc-page"
+    },
+    "Artist": {
+      "value": "<a href=\"//commons.wikimedia.org/wiki/User:Crotalus_horridus\" title=\"User:Crotalus horridus\">Crotalus horridus</a>, <a href=\"//commons.wikimedia.org/wiki/User:Monaneko\" title=\"User:Monaneko\">Monaneko</a>",
+      "source": "commons-desc-page"
+    },
+    "LicenseShortName": {
+      "value": "Public domain",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "UsageTerms": {
+      "value": "Public domain",
+      "source": "commons-desc-page"
+    },
+    "AttributionRequired": {
+      "value": "false",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Copyrighted": {
+      "value": "False",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Restrictions": {
+      "value": "trademarked",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "License": {
+      "value": "pd",
+      "source": "commons-templates",
+      "hidden": ""
+    }
+  },
+  "originalSHA256": "0827f70eee6bdfcfcafff8f156e7a0d0fbe3b473a5b8b8d39f6957b6eccd0547",
+  "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+}

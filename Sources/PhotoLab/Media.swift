@@ -145,7 +145,7 @@ actor ImageCacheService {
                 sourceImage = try await WorkScheduler.shared.run(.decode, control: control) {
                     if asset.video { return await MediaLoader.shared.videoFrame(url: url, dimension: dimension, analysis: control.priority < 2) }
                     let sources = PhotoEditStore.siblings(asset: asset, preferred: url)
-                    let edited = applyEdits ? await PhotoEditStore.loadPreview(sources: sources, thumbnail: true, maxDimension: dimension, analysis: control.priority < 2) : (image: nil as NSImage?, source: nil as URL?, error: nil as String?)
+                    let edited = applyEdits ? await PhotoEditStore.loadPreview(sources: sources, thumbnail: true, maxDimension: dimension, analysis: control.priority < 2, rotation: asset.quarterTurns) : (image: nil as NSImage?, source: nil as URL?, error: nil as String?)
                     if edited.source != nil {
                         guard let image = edited.image else { throw CatalogError(message: edited.error ?? "无法读取编辑结果") }
                         return image
@@ -241,7 +241,7 @@ final class MediaLoader: @unchecked Sendable {
             }
         }
     }
-    func photo(url: URL, raw: Bool, full: Bool, hdr: Bool, maxDimension: CGFloat = 2560, cacheKey: String? = nil, analysis: Bool = false) async -> MediaPreview {
+    func photo(url: URL, raw: Bool, full: Bool, hdr: Bool, maxDimension: CGFloat = 2560, cacheKey: String? = nil, analysis: Bool = false, logicalSize: Bool = false) async -> MediaPreview {
         if !full && !hdr, let cacheKey {
             do {
                 let data = try await ImageCacheService.shared.original(url: url, cacheKey: cacheKey, dimension: Int(maxDimension))
@@ -254,6 +254,8 @@ final class MediaLoader: @unchecked Sendable {
                 return MediaPreview(image: cached, error: cached == nil ? error.localizedDescription : nil)
             }
         }
+        let memoryKey = cacheKey.map { "original-v2|\($0)|\(full)|\(hdr)|\(Int(maxDimension))|\(logicalSize)" }
+        if let memoryKey, let image = cache.object(forKey:memoryKey as NSString) { return MediaPreview(image:image) }
         let cancellation = CancellationFlag()
         return await withTaskCancellationHandler(operation: {
           await withCheckedContinuation { continuation in
@@ -268,9 +270,14 @@ final class MediaLoader: @unchecked Sendable {
                     defer { if cacheKey != nil { PreviewCache.shared.release(url) } }
                     guard !cancellation.cancelled else { continuation.resume(returning: MediaPreview()); return }
                     var cg: CGImage?
+                    var sourceSize: CGSize?
                     if raw, let filter = CIRAWFilter(imageURL: url) {
+                        sourceSize = filter.nativeSize
+                        if !full { filter.scaleFactor = Float(min(1,maxDimension/max(filter.nativeSize.width,filter.nativeSize.height))) }
                         filter.extendedDynamicRangeAmount = hdr ? 1 : 0
                         if var image = filter.outputImage {
+                            // nativeSize may precede EXIF orientation. Match the decoded aspect.
+                            if let native = sourceSize, (native.width > native.height) != (image.extent.width > image.extent.height) { sourceSize = CGSize(width:native.height,height:native.width) }
                             if !full { let scale = min(1, maxDimension / max(image.extent.width, image.extent.height)); image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) }
                             let space = CGColorSpace(name: hdr ? CGColorSpace.extendedLinearDisplayP3 : CGColorSpace.displayP3)!
                             cg = CIContext().createCGImage(image, from: image.extent, format: hdr ? .RGBAh : .RGBA8, colorSpace: space)
@@ -279,6 +286,10 @@ final class MediaLoader: @unchecked Sendable {
                         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
                         let originalMax = max((properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 20000,
                                               (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 20000)
+                        let width = (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? originalMax
+                        let height = (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? originalMax
+                        let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+                        sourceSize = (5...8).contains(orientation) ? CGSize(width:height,height:width) : CGSize(width:width,height:height)
                         cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: full ? originalMax : maxDimension, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceDecodeRequest: hdr ? kCGImageSourceDecodeToHDR : kCGImageSourceDecodeToSDR] as CFDictionary)
                     }
                     guard !cancellation.cancelled else { continuation.resume(returning: MediaPreview()); return }
@@ -287,7 +298,11 @@ final class MediaLoader: @unchecked Sendable {
                         CGImageDestinationAddImage(destination,cg,[kCGImageDestinationLossyCompressionQuality:0.9] as CFDictionary)
                         if CGImageDestinationFinalize(destination) { PreviewCache.shared.record(preview,kind:"preview") }
                     }
-                    continuation.resume(returning: MediaPreview(image: NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))))
+                    let pixels = CGSize(width:cg.width,height:cg.height)
+                    let image = NSImage(cgImage:cg,size:logicalSize ? (sourceSize ?? pixels) : pixels)
+                    let cost = cg.bytesPerRow*cg.height
+                    if let memoryKey, cost <= 64*1024*1024 { self.cache.setObject(image,forKey:memoryKey as NSString,cost:cost) }
+                    continuation.resume(returning: MediaPreview(image:image))
                 }
             }
             operation.queuePriority = analysis ? .normal : .veryHigh
@@ -416,11 +431,11 @@ struct PhotoView: View {
             }
         }
         .preference(key: PhotoAspectRatios.self, value: image.map { [asset.id: asset.quarterTurns % 2 == 0 ? $0.size.width / max(1, $0.size.height) : $0.size.height / max(1, $0.size.width)] } ?? [:])
-        .task(id: "\(url.path)|\(useRAW)|\(full)|\(hdr)|\(showOriginal)|\(library.editRevision)") {
+        .task(id: "\(url.path)|\(useRAW)|\(full)|\(hdr)|\(showOriginal)|\(library.editRevision)|\(asset.quarterTurns)") {
             image = nil; failure = nil
             var source = useRAW ? (rawURL ?? url) : url
             if !showOriginal {
-                let edited = await PhotoEditStore.loadPreview(sources: useRAW ? [source] : PhotoEditStore.siblings(asset: asset, preferred: url), thumbnail: false)
+                let edited = await PhotoEditStore.loadPreview(sources: useRAW ? [source] : PhotoEditStore.siblings(asset: asset, preferred: url), thumbnail: false, rotation: asset.quarterTurns)
                 guard !Task.isCancelled else { return }
                 editedSource = edited.source
                 if edited.source != nil { image = edited.image; failure = edited.error; return }

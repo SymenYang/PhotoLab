@@ -6,6 +6,8 @@ import CryptoKit
 
 struct PhotoAdjustments: Codable, Equatable {
     var redlamp: RedlampGrade?
+    var decoration: PhotoDecoration?
+    var photoOnly: PhotoAdjustments { var a = self; a.decoration = nil; return a }
     var exposure = 0.0
     var temperature = 6500.0
     var tint = 0.0
@@ -26,10 +28,12 @@ struct PhotoAdjustments: Codable, Equatable {
         // Stored temperature/tint are ignored while using the source white balance.
         if asShot { normalized.temperature = 6500; normalized.tint = 0 }
         if normalized.redlamp?.isNeutral == true { normalized.redlamp = nil }
+        if normalized.decoration?.hasContent == false { normalized.decoration = nil }
         return normalized != PhotoAdjustments()
     }
     func validate() throws {
         try redlamp?.validate()
+        try decoration?.validate()
         let values = [exposure, temperature, tint, highlights, shadows, contrast, saturation, straighten, cropX, cropY, cropWidth, cropHeight]
         guard values.allSatisfy(\.isFinite), (-5...5).contains(exposure), (2000...50000).contains(temperature), (-150...150).contains(tint),
               (0...1).contains(highlights), (0...1).contains(shadows), (0.5...1.5).contains(contrast), (0...2).contains(saturation),
@@ -58,6 +62,7 @@ struct PhotoEditDocument: Codable {
     var pipelineVersion = 2
     var revision = UUID().uuidString
     var source: EditSource
+    var frameMetadata: FrameMetadata?
     var activeVersionID: String
     var versions: [PhotoEditVersion]
     var tiffBytes = 0
@@ -100,7 +105,7 @@ enum PhotoEditStore {
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
         guard try handle.read(upToCount: 8) == magic, let bytes = try handle.read(upToCount: 8), bytes.count == 8 else { throw CatalogError(message: "编辑文件头损坏") }
         let count = bytes.reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
-        guard count > 0, count < 4_000_000, let data = try handle.read(upToCount: Int(count)), data.count == Int(count) else { throw CatalogError(message: "编辑文件长度无效") }
+        guard count > 0, count < 64_000_000, let data = try handle.read(upToCount: Int(count)), data.count == Int(count) else { throw CatalogError(message: "编辑文件长度无效") }
         var doc = try PropertyListDecoder().decode(PhotoEditDocument.self, from: data)
         try doc.validate()
         let length = try handle.seekToEnd()
@@ -236,7 +241,8 @@ enum PhotoEditStore {
         return CGRect(x: -w*scale/2, y: -h*scale/2, width: w*scale, height: h*scale).integral.insetBy(dx: 1, dy: 1)
     }
     static func cgImage(_ image: CIImage, sixteenBit: Bool = false) throws -> CGImage {
-        guard let cg = context.createCGImage(image, from: image.extent, format: sixteenBit ? .RGBA16 : .RGBA8, colorSpace: colorSpace) else { throw CatalogError(message: "全分辨率渲染失败，可能内存不足") }
+        // Finish pixels on the caller's render queue, never during UI display.
+        guard let cg = context.createCGImage(image, from: image.extent, format: sixteenBit ? .RGBA16 : .RGBA8, colorSpace: colorSpace, deferred: false) else { throw CatalogError(message: "全分辨率渲染失败，可能内存不足") }
         return cg
     }
     static func encode(_ image: CGImage, to url: URL, tiff: Bool) throws {
@@ -249,13 +255,30 @@ enum PhotoEditStore {
     static func save(_ input: PhotoEditDocument, source: URL, expectedToken: String?, cache: Bool) throws -> EditEnvelope {
         guard try sourceMatches(source, document: input) else { throw CatalogError(message: "原片已变化，停止保存以免编辑绑定到错误文件") }
         var doc = input; doc.revision = UUID().uuidString; doc.cacheRevision = nil; doc.tiffBytes = 0; doc.thumbnailBytes = 0
-        doc.outputWidth = nil; doc.outputHeight = nil
+        doc.outputWidth = nil; doc.outputHeight = nil; doc.frameMetadata = FrameMetadata.read(source)
         let destination = sidecar(source), parent = destination.deletingLastPathComponent()
         let stage = parent.appendingPathComponent(".photolab-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: stage) }
         let full = stage.appendingPathComponent("result.tiff"), small = stage.appendingPathComponent("thumbnail.jpg")
-        if cache {
+        let previous = try read(source)
+        let reuse = previous.map { $0.token == expectedToken && $0.document.cacheRevision == $0.document.revision && $0.document.tiffBytes > 0 && $0.document.pipelineVersion == doc.pipelineVersion && $0.document.adjustments.photoOnly == doc.adjustments.photoOnly } ?? false
+        let writeCache = cache || reuse
+        if reuse, let previous {
+            let reader = try FileHandle(forReadingFrom: sidecar(source)); defer { try? reader.close() }
+            try reader.seek(toOffset: previous.payloadOffset)
+            for (file, count) in [(full, previous.document.tiffBytes), (small, previous.document.thumbnailBytes)] {
+                FileManager.default.createFile(atPath: file.path, contents: nil)
+                let writer = try FileHandle(forWritingTo: file); defer { try? writer.close() }
+                var remaining = count
+                while remaining > 0 {
+                    guard let bytes = try reader.read(upToCount: min(remaining, 1_048_576)), !bytes.isEmpty else { throw CatalogError(message: "编辑缓存读取不完整") }
+                    try writer.write(contentsOf: bytes); remaining -= bytes.count
+                }
+            }
+            doc.tiffBytes = previous.document.tiffBytes; doc.thumbnailBytes = previous.document.thumbnailBytes
+            doc.outputWidth = previous.document.outputWidth; doc.outputHeight = previous.document.outputHeight; doc.cacheRevision = doc.revision
+        } else if cache {
             let image = try render(source, adjustments: doc.adjustments, pipelineVersion: doc.pipelineVersion)
             try encode(cgImage(image, sixteenBit: true), to: full, tiff: true)
             let scale = min(1, 480 / max(image.extent.width, image.extent.height))
@@ -267,6 +290,7 @@ enum PhotoEditStore {
         try doc.validate()
         let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
         let metadata = try encoder.encode(doc)
+        guard metadata.count < 64_000_000 else { throw CatalogError(message: "编辑记录过大，请减少贴纸素材或版本数量") }
         let temp = stage.appendingPathComponent("document")
         FileManager.default.createFile(atPath: temp.path, contents: nil)
         let output = try FileHandle(forWritingTo: temp)
@@ -275,7 +299,7 @@ enum PhotoEditStore {
             var length = UInt64(metadata.count).bigEndian
             try output.write(contentsOf: withUnsafeBytes(of: &length) { Data($0) })
             try output.write(contentsOf: metadata)
-            if cache { for file in [full, small] {
+            if writeCache { for file in [full, small] {
                 let reader = try FileHandle(forReadingFrom: file); defer { try? reader.close() }
                 while let data = try reader.read(upToCount: 1_048_576), !data.isEmpty { try output.write(contentsOf: data) }
             } }
@@ -316,45 +340,73 @@ enum PhotoEditStore {
         cache.totalCostLimit = 64 * 1024 * 1024
         return cache
     }()
-    static func preview(_ source: URL, thumbnail: Bool, maxDimension: Int = 480) throws -> NSImage? {
+    static func preview(_ source: URL, thumbnail: Bool, maxDimension: Int = 480, rotation: Int = 0, logicalSize: Bool = false) throws -> NSImage? {
         guard let envelope = try read(source) else { return nil }
         let doc = envelope.document
         // Cached results may be used when the source is offline, but not when a readable source has changed.
         if FileManager.default.fileExists(atPath: source.path), try !sourceMatches(source, document: doc) { throw CatalogError(message: "原片已变化，编辑结果需要重新确认") }
         let dimension = max(1, maxDimension)
-        let cacheKey = "\(source.path)|\(doc.revision)|\(dimension)" as NSString
+        let cacheKey = "\(source.path)|\(doc.revision)|\(dimension)|\(rotation)|\(logicalSize)" as NSString
         if thumbnail, let image = thumbnailCache.object(forKey: cacheKey) { return image }
-        func image(from cg: CGImage) -> NSImage {
-            let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        func image(from input: CGImage, sourceSize: CGSize) throws -> NSImage {
+            let composed = try PhotoDecorationRenderer.compose(CIImage(cgImage: input), decoration: doc.adjustments.decoration, metadata: doc.frameMetadata ?? FrameMetadata.read(source), rotation: rotation)
+            let cg = try cgImage(composed)
+            let upright = rotation%2 == 0 ? sourceSize : CGSize(width:sourceSize.height,height:sourceSize.width)
+            let d = doc.adjustments.decoration?.migrated(metadata:doc.frameMetadata ?? FrameMetadata(),photo:upright)
+            let framed = d.map { DecorationLayout.make(photo:upright,decoration:$0).size } ?? upright
+            let size = rotation%2 == 0 ? framed : CGSize(width:framed.height,height:framed.width)
+            let image = NSImage(cgImage: cg, size: logicalSize ? size : NSSize(width: cg.width, height: cg.height))
             if thumbnail { thumbnailCache.setObject(image, forKey: cacheKey, cost: cg.width * cg.height * 4) }
             return image
         }
         if doc.cacheRevision == doc.revision && doc.tiffBytes > 0 {
             let handle = try FileHandle(forReadingFrom: sidecar(source)); defer { try? handle.close() }
-            let useSmall = thumbnail && dimension <= 480 && doc.thumbnailBytes > 0
+            let useSmall = thumbnail && !logicalSize && dimension <= 480 && doc.thumbnailBytes > 0
             let count = useSmall ? doc.thumbnailBytes : doc.tiffBytes
             try handle.seek(toOffset: envelope.payloadOffset + (useSmall ? UInt64(doc.tiffBytes) : 0))
             if let bytes = try handle.read(upToCount: count), bytes.count == count,
                let imageSource = CGImageSourceCreateWithData(bytes as CFData, nil) {
-                let cg = thumbnail ? CGImageSourceCreateThumbnailAtIndex(imageSource, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: dimension, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) : CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
-                if let cg { return image(from: cg) }
+                // Decode once on the preview queue. A lazy TIFF provider can
+                // repeatedly decompress strips when Core Image requests tiles,
+                // and defer that work all the way to the main-thread display.
+                let options: [CFString: Any] = [kCGImageSourceShouldCache: true, kCGImageSourceShouldCacheImmediately: true]
+                let cg = thumbnail ? CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options.merging([kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: dimension, kCGImageSourceCreateThumbnailWithTransform: true]) { _, new in new } as CFDictionary) : CGImageSourceCreateImageAtIndex(imageSource, 0, options as CFDictionary)
+                if let cg {
+                    let properties = CGImageSourceCopyPropertiesAtIndex(imageSource,0,nil) as? [CFString:Any]
+                    let size = CGSize(width:(properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? Double(cg.width),height:(properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? Double(cg.height))
+                    if !thumbnail {
+                        // ImageIO's immediate-cache hint alone still leaves a
+                        // TIFF provider on some systems. Detach its decoded bytes
+                        // before Core Image requests the same strips per tile.
+                        guard let bytes = cg.dataProvider?.data, let provider = CGDataProvider(data:bytes),
+                              let decoded = CGImage(width:cg.width,height:cg.height,bitsPerComponent:cg.bitsPerComponent,bitsPerPixel:cg.bitsPerPixel,bytesPerRow:cg.bytesPerRow,space:cg.colorSpace ?? colorSpace,bitmapInfo:cg.bitmapInfo,provider:provider,decode:cg.decode,shouldInterpolate:cg.shouldInterpolate,intent:cg.renderingIntent) else { throw CatalogError(message:"无法解码编辑预览缓存") }
+                        return try image(from:decoded,sourceSize:size)
+                    }
+                    return try image(from:cg,sourceSize:size)
+                }
             }
         }
         var rendered = try render(source, adjustments: doc.adjustments, pipelineVersion: doc.pipelineVersion)
+        let sourceSize = rendered.extent.size
         if thumbnail { let scale = min(1, CGFloat(dimension) / max(rendered.extent.width, rendered.extent.height)); rendered = rendered.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) }
         let cg = try cgImage(rendered)
-        return image(from: cg)
+        return try image(from: cg, sourceSize:sourceSize)
     }
     private static let previewQueue = DispatchQueue(label: "photolab.edited-preview", qos: .userInitiated)
     private static let analysisPreviewQueue = DispatchQueue(label: "photolab.analysis-edited-preview", qos: .utility)
-    static func loadPreview(sources: [URL], thumbnail: Bool, maxDimension: Int = 480, analysis: Bool = false) async -> (image: NSImage?, source: URL?, error: String?) {
-        await withCheckedContinuation { continuation in
-            (analysis ? analysisPreviewQueue : previewQueue).async {
-                guard let source = preferredSource(sources) else { continuation.resume(returning: (nil, nil, nil)); return }
-                do { continuation.resume(returning: (try autoreleasepool { try preview(source, thumbnail: thumbnail, maxDimension: maxDimension) }, source, nil)) }
-                catch { continuation.resume(returning: (nil, source, "无法读取编辑结果：" + error.localizedDescription)) }
+    static func loadPreview(sources: [URL], thumbnail: Bool, maxDimension: Int = 480, analysis: Bool = false, rotation: Int = 0, logicalSize: Bool = false) async -> (image: NSImage?, source: URL?, error: String?) {
+        // Discovery must not wait behind another photo's full-resolution render.
+        guard let source = try? await findPreferredSource(sources), !Task.isCancelled else { return (nil,nil,nil) }
+        let cancellation = CancellationFlag()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                (analysis ? analysisPreviewQueue : previewQueue).async {
+                    guard !cancellation.cancelled else { continuation.resume(returning:(nil,nil,nil)); return }
+                    do { continuation.resume(returning: (try autoreleasepool { try preview(source, thumbnail: thumbnail, maxDimension: maxDimension, rotation: rotation, logicalSize:logicalSize) }, source, nil)) }
+                    catch { continuation.resume(returning: (nil, source, "无法读取编辑结果：" + error.localizedDescription)) }
+                }
             }
-        }
+        } onCancel: { cancellation.cancel() }
     }
     static func export(_ source: URL, to destination: URL, rotation: Int = 0, options: PhotoExportOptions = PhotoExportOptions()) throws -> URL {
         let a: PhotoAdjustments
@@ -368,6 +420,7 @@ enum PhotoEditStore {
         defer { try? FileManager.default.removeItem(at: tmp) }
         func write(preserveHDR: Bool) throws {
             var image = try render(source, adjustments: a, pipelineVersion: pipelineVersion, preserveHDR: preserveHDR)
+            image = try PhotoDecorationRenderer.compose(image, decoration: a.decoration, metadata: FrameMetadata.read(source), rotation: rotation)
             if rotation != 0 { image = image.oriented(rotation == 1 ? .right : rotation == 2 ? .down : .left) }
             if options.format == .tiff {
                 try encode(cgImage(image, sixteenBit: true), to: tmp, tiff: true)
@@ -383,7 +436,7 @@ enum PhotoEditStore {
         }
         // HDR is a preference. Redlamp supplies SDR; other pipelines may fail
         // HDR decoding/encoding. Retry the same saved edit in SDR in either case.
-        if options.format == .jpeg && options.preserveHDR && a.redlamp == nil {
+        if options.format == .jpeg && options.preserveHDR && a.redlamp == nil && a.decoration?.active != true {
             do { try write(preserveHDR: true) }
             catch {
                 if FileManager.default.fileExists(atPath: tmp.path) { try FileManager.default.removeItem(at: tmp) }

@@ -25,6 +25,7 @@ private final class EngineSession: @unchecked Sendable {
     var input: URL?
     var info: ImageInfo?
     var autoBalance: WhiteBalanceValue?
+    var renderedBalance = WhiteBalanceValue(temperature: 5500, tint: 0)
     init() throws { engine = try RedlampEngine(decoder: InProcessDecoder(), lensProfiles: .user, cameraProfiles: .user) }
     func open(_ url: URL) throws -> ImageInfo {
         if input == url, let info { return info }
@@ -39,6 +40,9 @@ private final class EngineSession: @unchecked Sendable {
         if let balance = mode == .auto ? autoBalance : mode.presetValue {
             recipe[.temperature] = balance.temperature; recipe[.tint] = balance.tint
         }
+        renderedBalance = mode == .asShot
+            ? (info?.asShotWhiteBalance ?? WhiteBalanceValue(temperature: 5500, tint: 0))
+            : WhiteBalanceValue(temperature: recipe[.temperature], tint: recipe[.tint])
         let request = StillRequest(recipe: recipe, maxLongEdge: edge > 0 ? edge : nil,
                                    colorSpace: .sRGB, bitsPerComponent: exporting ? 16 : 8,
                                    purpose: exporting ? .export : .preview)
@@ -54,7 +58,21 @@ private func report(_ error: Error, _ destination: UnsafeMutablePointer<CChar>?,
 }
 
 @_cdecl("photolab_redlamp_abi")
-public func abi() -> Int32 { 1 }
+public func abi() -> Int32 { 2 }
+
+@_cdecl("photolab_redlamp_white_balance")
+public func renderedWhiteBalance(_ pointer: UnsafeMutableRawPointer, _ temperature: UnsafeMutablePointer<Double>, _ tint: UnsafeMutablePointer<Double>) {
+    let balance = Unmanaged<EngineSession>.fromOpaque(pointer).takeUnretainedValue().renderedBalance
+    temperature.pointee = balance.temperature; tint.pointee = balance.tint
+}
+
+@_cdecl("photolab_redlamp_curve_samples")
+public func curveSamples(_ coordinates: UnsafePointer<Double>, _ count: Int32, _ output: UnsafeMutablePointer<Double>, _ outputCount: Int32) {
+    guard count >= 2, count <= 256, outputCount >= 2, outputCount <= 4096 else { return }
+    let points = (0..<Int(count)).map { CurvePoint(x: coordinates[$0 * 2], y: coordinates[$0 * 2 + 1]) }
+    let curve = ToneCurveMath.pointCurve(points)
+    for index in 0..<Int(outputCount) { output[index] = min(1, max(0, curve(Double(index) / Double(outputCount - 1)))) }
+}
 
 @_cdecl("photolab_redlamp_create")
 public func create(_ errorBuffer: UnsafeMutablePointer<CChar>?, _ capacity: Int32) -> UnsafeMutableRawPointer? {

@@ -5,7 +5,7 @@
   "metallib_sha256": "3efc571be88599362179d67773e2e9a8562c99035018e112ccfefc34cf93c72b",
   "metallib_source": "Matching v0.3.3-alpha official RedlampKernels.framework; shader sources are retained under packages/RedlampKernels. Set PHOTOLAB_COMPILE_METAL=1 to rebuild with Apple's optional Metal toolchain.",
   "license": "MPL-2.0; see LICENSE",
-  "changes": "Unmodified engine-side source packages; PhotoLab bridge and build tooling live outside this directory.",
+  "changes": "PhotoLab adds relative white balance and automatic white balance for rendered RGB in RedlampEngine/Sources/ImageSession.swift and RedlampEngine.swift. The RAW white-balance path and Metal shaders are unchanged. PhotoLab bridge and build tooling live outside this directory.",
   "libraw": "https://github.com/pdcgomes/redlamp-libraw/archive/3b20539d3faa766a370e93a529a3b87edffbf0f6.tar.gz",
   "libraw_sha256": "2c98d641b777d9a67dd8c716a6e5cfd4479648057eae267e08e3b5c4899c5145",
   "libraw_license": "CDDL-1.0 option of upstream dual license; source and licenses are in vendor/LibRaw.tar.gz"

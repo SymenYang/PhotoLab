@@ -130,16 +130,26 @@ struct ContentView: View {
                 header.disabled(editor.isPresented)
                 if showFilterBar && !editor.isPresented { filters }
                 Divider()
-                if editor.isPresented { PhotoEditorView(editor: editor) }
-                else if model.loading { ProgressView("正在载入本地图录…").frame(maxWidth: .infinity, maxHeight: .infinity) }
-                else if model.roots.isEmpty { welcome }
-                else if model.filtered.isEmpty && model.mode == "grid" { ContentUnavailableView("没有匹配的素材", systemImage: model.scanning ? "arrow.trianglehead.2.clockwise" : "line.3.horizontal.decrease", description: Text(semantic.busy ? "正在本地检索…" : model.scanning ? "正在扫描目录，完成后显示素材。" : "调整搜索文字或筛选条件。" )).frame(maxWidth: .infinity, maxHeight: .infinity) }
-                else {
-                    ZStack {
-                        grid.opacity(model.mode == "grid" ? 1 : 0)
-                            .allowsHitTesting(model.mode == "grid").accessibilityHidden(model.mode != "grid")
-                        if model.mode != "grid" { viewer }
+                ZStack {
+                    // Keep the saved browsing image alive while editing a draft.
+                    // Discard can reveal it immediately; an explicit save still
+                    // reloads it through the library's edit revision.
+                    Group {
+                        if model.loading { ProgressView("正在载入本地图录…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+                        else if model.roots.isEmpty { welcome }
+                        else if model.filtered.isEmpty && model.mode == "grid" { ContentUnavailableView("没有匹配的素材", systemImage: model.scanning ? "arrow.trianglehead.2.clockwise" : "line.3.horizontal.decrease", description: Text(semantic.busy ? "正在本地检索…" : model.scanning ? "正在扫描目录，完成后显示素材。" : "调整搜索文字或筛选条件。" )).frame(maxWidth: .infinity, maxHeight: .infinity) }
+                        else {
+                            ZStack {
+                                grid.opacity(model.mode == "grid" ? 1 : 0)
+                                    .allowsHitTesting(model.mode == "grid").accessibilityHidden(model.mode != "grid")
+                                if model.mode != "grid" { viewer }
+                            }
+                        }
                     }
+                    .opacity(editor.isPresented ? 0 : 1)
+                    .allowsHitTesting(!editor.isPresented)
+                    .accessibilityHidden(editor.isPresented)
+                    if editor.isPresented { PhotoEditorView(editor: editor) }
                 }
                 Divider()
                 if editor.isPresented { HStack { taskButton; Spacer() }.padding(8) } else { footer }
@@ -586,6 +596,7 @@ struct ContentView: View {
     }
     private func openEditor(_ asset: Asset) {
         guard !asset.video, !editor.isPresented else { return }
+        let decorationBatchIDs = model.selection.contains(asset.id) ? model.selection : [asset.id]
         model.select(asset)
         model.enterSingle()
         let lookup = Dictionary(uniqueKeysWithValues: model.assets.map { ($0.id, $0) })
@@ -594,9 +605,10 @@ struct ContentView: View {
         let items = assets.map { photo in
             EditablePhoto(id: photo.id, name: photo.name, sources: photo.files.compactMap { model.url(for: photo, file: $0) }, rotation: photo.quarterTurns)
         }.filter { !$0.sources.isEmpty }
-        editor.onChange = { model.editRevision += 1; model.scheduleAnalysisEdits(ids: editor.current.map { [$0.id] }) }
+        editor.onCommit = { id in model.editRevision += 1; model.scheduleAnalysisEdits(ids: [id]) }
         editor.onSelect = { id in if let current = model.assets.first(where: { $0.id == id }) { model.select(current) } }
-        editor.open(items, selectedID: asset.id)
+        editor.onBatchChange = { ids in model.editRevision += 1; model.scheduleAnalysisEdits(ids: ids) }
+        editor.open(items, selectedID: asset.id, batchIDs: decorationBatchIDs)
     }
     private func presentPhoto() {
         guard let asset = model.focused ?? model.filtered.first, !asset.video else { return }
@@ -604,7 +616,7 @@ struct ContentView: View {
         let lookup = Dictionary(uniqueKeysWithValues: model.assets.map { ($0.id, $0) })
         let entries = snapshot.ids.compactMap { lookup[$0] }.filter { !$0.video }.compactMap { item -> PhotoViewingEntry? in
             guard let url = model.url(for: item) else { return nil }
-            return PhotoViewingEntry(id: item.id, name: item.name, url: url, raw: item.preferred.isRAW, cacheKey: MediaLoader.shared.key(asset: item, file: item.preferred), rotation: item.quarterTurns, rating: item.rating, editSources: PhotoEditStore.siblings(asset: item, preferred: url))
+            return PhotoViewingEntry(id: item.id, name: item.name, url: url, raw: item.preferred.isRAW, cacheKey: MediaLoader.shared.key(asset: item, file: item.preferred), rotation: item.quarterTurns, rating: item.rating, editSources: PhotoEditStore.siblings(asset: item, preferred: url), asset: item)
         }
         PhotoViewingController.shared.present(entries: entries, selectedID: asset.id, navigation: snapshot, withinGroup: model.withinPhotoGroup, onNavigationMode: { model.withinPhotoGroup = $0 }, onClose: { id in
             if let current = model.assets.first(where: { $0.id == id }) { model.select(current); model.rebuild() }

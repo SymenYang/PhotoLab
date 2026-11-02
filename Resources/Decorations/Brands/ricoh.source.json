@@ -1,0 +1,81 @@
+{
+  "brand": "ricoh",
+  "file": "ricoh.svg",
+  "source": "https://commons.wikimedia.org/wiki/File:Ricoh_logo_2005.svg",
+  "download": "https://upload.wikimedia.org/wikipedia/commons/2/2e/Ricoh_logo_2005.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+  "retrieved": "2026-10-30",
+  "sha256": "3aa9e6d1820eff8a2748802a349a1cf0b1b4a8df3a89b688ca52fa2c93d25221",
+  "metadata": {
+    "DateTime": {
+      "value": "2008-11-11 10:39:46",
+      "source": "mediawiki-metadata",
+      "hidden": ""
+    },
+    "ObjectName": {
+      "value": "Ricoh logo 2005",
+      "source": "mediawiki-metadata"
+    },
+    "CommonsMetadataExtension": {
+      "value": 1.2,
+      "source": "extension",
+      "hidden": ""
+    },
+    "Categories": {
+      "value": "With trademark|Ricoh|PD textlogo|SVG text logos|5 letter alphabet logos of Japan|Valid SVG created with Inkscape:Text logos|Red alphabet logos of Japan|SVG logos of manufacturing companies of Japan",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "Assessments": {
+      "value": "",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "ImageDescription": {
+      "value": "Ricoh logo from 2005 with the 2012 introduced corporate tagline \"imagine. change.\"",
+      "source": "commons-desc-page"
+    },
+    "DateTimeOriginal": {
+      "value": "2 December 2009 (upload date)",
+      "source": "commons-desc-page"
+    },
+    "Credit": {
+      "value": "site ricoh.pt",
+      "source": "commons-desc-page"
+    },
+    "Artist": {
+      "value": "ricoh portugal",
+      "source": "commons-desc-page"
+    },
+    "LicenseShortName": {
+      "value": "Public domain",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "UsageTerms": {
+      "value": "Public domain",
+      "source": "commons-desc-page"
+    },
+    "AttributionRequired": {
+      "value": "false",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Copyrighted": {
+      "value": "False",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Restrictions": {
+      "value": "trademarked",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "License": {
+      "value": "pd",
+      "source": "commons-templates",
+      "hidden": ""
+    }
+  },
+  "originalSHA256": "8508bb3b741c70b535606af079758cd64471fce481f4ae3d67f134fc8798981b",
+  "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+}

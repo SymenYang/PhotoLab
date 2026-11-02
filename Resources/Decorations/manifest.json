@@ -1,0 +1,667 @@
+[
+  {
+    "file": "Paper001_Color.jpg",
+    "source": "https://ambientcg.com/view?id=Paper001",
+    "download": "https://ambientcg.com/get?file=Paper001_1K-JPG.zip",
+    "author": "ambientCG / Lennart Demes",
+    "license": "CC0-1.0",
+    "licenseURL": "https://docs.ambientcg.com/license/",
+    "retrieved": "2026-10-30",
+    "sha256": "e8db6f5b91f7882f4711ab5b2dc5c2e91f822d4f80a7d0081991532cf5cd9b9a"
+  },
+  {
+    "file": "tape-sand.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "2c6c86ddd78dcb3da957f2d9f21803125dd663149a4a9c5debf32519b1fd41e0"
+  },
+  {
+    "file": "tape-sage.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "6b1b832090d411838326f958d28362bd6a172478a5651700f138bb0b8d01abe4"
+  },
+  {
+    "file": "tape-charcoal.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "e57d58b88cd13ff7bdc0e0969b60f01f4c1d3354a9882830487d0c266871d0ef"
+  },
+  {
+    "file": "arrow.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "0d0d469f3e2a973fff275b5cf241013805a5aa4e6a0e0c0fdab9ff38fbb373f4"
+  },
+  {
+    "file": "curve-arrow.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "2f4690267a98b9b53a630c7dec5569641401eaa82dbe683d2e6b0ad627d031dc"
+  },
+  {
+    "file": "heart.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "c5ece9b73a209dfca49f271e36c3325dca242d1aa1ee4848f146ba28611e7b21"
+  },
+  {
+    "file": "star.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "41e090c5b3ec49c0e6dfafa4ea533baf9ac5835e8a4da00c4ba5bacb050ecc99"
+  },
+  {
+    "file": "label.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "47d06831bb065d7f4ebba6c69bb8829dd3f60baa8f350a33a0026b88d08b1faf"
+  },
+  {
+    "file": "ticket.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "b7cd8f225f9ecb87af5e14073fbe44da8356eb2124dd1c6d270f94aab3dc386a"
+  },
+  {
+    "file": "archive.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "de2f7733d8905184408e09370c923d3a2ec0d55aab90d9681efe092d0e5f6717"
+  },
+  {
+    "file": "corners.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "ec1e4defdfdf9fa0731c7488f631563505053f6cf79ef5cfc4bbb03015db82e4"
+  },
+  {
+    "file": "underline.svg",
+    "author": "PhotoLab",
+    "license": "CC0-1.0",
+    "source": "Original vector artwork created for PhotoLab",
+    "sha256": "889cb539c2cc0e684fc63ddd2771bcbcaff6cbe3897ab9d908949a8f48ef28ba"
+  },
+  {
+    "file": "Brands/canon.svg",
+    "author": "Brand owner; see source page",
+    "source": "https://commons.wikimedia.org/wiki/File:Canon_wordmark.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/0/0a/Canon_wordmark.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "b6c0983237b9e41336d2b0ae913fb6e4e25b6577d896a6deb67d7e61ada18a54",
+    "sourceRecord": "Brands/canon.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/dji.svg",
+    "author": "DJI Innovations",
+    "source": "https://commons.wikimedia.org/wiki/File:DJI_Innovations_logo.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/9/9a/DJI_Innovations_logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "0720428233594cba716bfbf82a299bcf4b3c0468170f2a768bf69bec5852e2ba",
+    "sourceRecord": "Brands/dji.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/fujifilm.svg",
+    "author": "The original uploader was Cristan at English Wikipedia.",
+    "source": "https://commons.wikimedia.org/wiki/File:Fujifilm_logo.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/a/a1/Fujifilm_logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "e969e8fdc262cb40b8c6d5f5876482dd3b6d63e7a0775685fdd7f1989b30fe1e",
+    "sourceRecord": "Brands/fujifilm.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/hasselblad.svg",
+    "author": "Victor Hasselblad AB",
+    "source": "https://commons.wikimedia.org/wiki/File:Hasselblad_logo.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/d/dd/Hasselblad_logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "cf2423617cca84df6ac3980bb2b396733d903c49561536019abb0ecb3f54a2d3",
+    "sourceRecord": "Brands/hasselblad.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/leica.svg",
+    "author": "Leica Camera",
+    "source": "https://commons.wikimedia.org/wiki/File:Leica_Camera.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/8/8e/Leica_Camera.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "d5eaff75c490fe7169255f21c801eb4578c3d8042b35079f685af776f87b52a8",
+    "sourceRecord": "Brands/leica.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/nikon.svg",
+    "author": "Nikon Corporation",
+    "source": "https://commons.wikimedia.org/wiki/File:Nikon_Logo.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/f/f3/Nikon_Logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "fb502fb4df3873efd1c0078fd7c2aaee63d5247634d9ac4c80094dae06ae5fd0",
+    "sourceRecord": "Brands/nikon.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/olympus.svg",
+    "author": "Olympus Corporation",
+    "source": "https://commons.wikimedia.org/wiki/File:Olympus_Corporation_logo.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/2/2d/Olympus_Corporation_logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "38f704e4e7ee7a378b5bfdc517176c10f10005d49bf8ea43aac096b7207335bf",
+    "sourceRecord": "Brands/olympus.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/om-system.svg",
+    "author": "OM Digital Solutions",
+    "source": "https://omsystem.com/en/",
+    "download": "https://omsystem.com/assets/images/brand/omsystem_logo_wht.svg",
+    "license": "Proprietary trademark asset; no open-content license stated",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "a949194559e535e78cde27400c3533c3d25ed86fae17db3b8f759b7215151d8c",
+    "sourceRecord": "Brands/om-system.source.json",
+    "modifications": "None; official white vector mark, displayed on a black plate"
+  },
+  {
+    "file": "Brands/panasonic.svg",
+    "author": "Crotalus horridus, Monaneko",
+    "source": "https://commons.wikimedia.org/wiki/File:Panasonic_logo_(Blue).svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/8/8e/Panasonic_logo_%28Blue%29.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "84b58eb5c160a031ca5d359c69909c7917bfff7b8bceed9940f6bf8272836918",
+    "sourceRecord": "Brands/panasonic.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/pentax.svg",
+    "author": "Pentax Corporation",
+    "source": "https://commons.wikimedia.org/wiki/File:Pentax_Logo.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/8/81/Pentax_Logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "7df167c069b8bb70ccd8e740ae397c8f6eede22919f18889ec584cb1afeb18a9",
+    "sourceRecord": "Brands/pentax.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/ricoh.svg",
+    "author": "ricoh portugal",
+    "source": "https://commons.wikimedia.org/wiki/File:Ricoh_logo_2005.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/2/2e/Ricoh_logo_2005.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "3aa9e6d1820eff8a2748802a349a1cf0b1b4a8df3a89b688ca52fa2c93d25221",
+    "sourceRecord": "Brands/ricoh.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/sigma.svg",
+    "author": "Sigma Corporation",
+    "source": "https://commons.wikimedia.org/wiki/File:Sigma%27s_new_updated_logo_revealed,_February_2025.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/8/8f/Sigma%27s_new_updated_logo_revealed%2C_February_2025.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "f0c023b926389c786993626328c41f70248c65c73365578ca88bdac551198ad4",
+    "sourceRecord": "Brands/sigma.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "file": "Brands/sony.svg",
+    "author": "Yasuo Kuroki, Sony",
+    "source": "https://commons.wikimedia.org/wiki/File:Sony_logo.svg",
+    "download": "https://upload.wikimedia.org/wikipedia/commons/c/ca/Sony_logo.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "license": "Public domain",
+    "trademark": "Brand marks remain trademarks of their respective owners. No affiliation or endorsement is implied. Not part of PhotoLab CC0 sticker artwork.",
+    "retrieved": "2026-10-30",
+    "sha256": "5ff49bf7e3698ef4faad8d7cf2afbf31725e2fb04474de48abaf52ca7e4bd17d",
+    "sourceRecord": "Brands/sony.source.json",
+    "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+  },
+  {
+    "brand": "hasselblad-symbol",
+    "file": "Brands/hasselblad-symbol.svg",
+    "source": "https://www.hasselblad.com/phocus/",
+    "reference": "Official Phocus.app/Contents/Resources/HLogo_Nobackground.png (1080 x 1080); vector transcription of the H polygon, not an official SVG release",
+    "referenceSHA256": "4315560d7280426cecc058a0228fa0de21b786e7ed1ee87bfcbf87fd4b58ae21",
+    "license": "Proprietary brand mark; no open-content license stated",
+    "retrieved": "2026-10-30",
+    "sha256": "73802f2a685ead6c66f487ac56076de3513e40ad85560c92008d8e24c2d8fa3d"
+  },
+  {
+    "file": "Brands/Variants/canon-black.svg",
+    "derivedFrom": "Brands/canon.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Canon_wordmark.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "d2b2d2cf5b5a3f7b4efa099f660e031adabcf07ea7c4d4f9573e183060fffdd4",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/canon-original.svg",
+    "derivedFrom": "Brands/canon.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Canon_wordmark.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "b6c0983237b9e41336d2b0ae913fb6e4e25b6577d896a6deb67d7e61ada18a54",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/canon-white.svg",
+    "derivedFrom": "Brands/canon.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Canon_wordmark.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "20726af98bcd9e7ea68cbafcf3938248a8ce819b10a282747fede567cabc5d5d",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/dji-black.svg",
+    "derivedFrom": "Brands/dji.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:DJI_Innovations_logo.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "75c32b8f07494e1acd15e5f358b23cb41358be3759af5e623902ff88729d1b27",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/dji-original.svg",
+    "derivedFrom": "Brands/dji.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:DJI_Innovations_logo.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "0720428233594cba716bfbf82a299bcf4b3c0468170f2a768bf69bec5852e2ba",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/dji-white.svg",
+    "derivedFrom": "Brands/dji.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:DJI_Innovations_logo.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "9b893db6e60b0557109183e45cf16fa01015f4ad446a73ed4974fae3ef6d2462",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/fujifilm-black.svg",
+    "derivedFrom": "Brands/fujifilm.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Fujifilm_logo.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "88808bb81c49a6639c5bdd7a32c06e6c8f2b4e57f783d864d9cd7ba4c757a906",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/fujifilm-original.svg",
+    "derivedFrom": "Brands/fujifilm.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Fujifilm_logo.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "e969e8fdc262cb40b8c6d5f5876482dd3b6d63e7a0775685fdd7f1989b30fe1e",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/fujifilm-white.svg",
+    "derivedFrom": "Brands/fujifilm.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Fujifilm_logo.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "7c2f55994e826c4cf8b62c8bd25fb47dbdebefeedfcf8bcbacba1b694a777cd3",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/hasselblad-black.svg",
+    "derivedFrom": "Brands/hasselblad.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Hasselblad_logo.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "ee0c3fdba9e8f09d1d4703cea87decf09cffcd003258e89f8409a9d8a5e2bbe6",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/hasselblad-original.svg",
+    "derivedFrom": "Brands/hasselblad.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Hasselblad_logo.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "cf2423617cca84df6ac3980bb2b396733d903c49561536019abb0ecb3f54a2d3",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/hasselblad-symbol-black.svg",
+    "derivedFrom": "Brands/hasselblad-symbol.svg",
+    "source": "https://www.hasselblad.com/phocus/",
+    "license": "Proprietary brand mark; no open-content license stated",
+    "variant": "black",
+    "sha256": "c4278c2b98655309b3bcdae3b8df539a1b209772fdb1591e06195a4479c015be",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/hasselblad-symbol-original.svg",
+    "derivedFrom": "Brands/hasselblad-symbol.svg",
+    "source": "https://www.hasselblad.com/phocus/",
+    "license": "Proprietary brand mark; no open-content license stated",
+    "variant": "original",
+    "sha256": "e7d8a2fb1a87fb96cdfc663546fb6bdbc5b08d6311b641a583d37b2a779e80a9",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/hasselblad-symbol-white.svg",
+    "derivedFrom": "Brands/hasselblad-symbol.svg",
+    "source": "https://www.hasselblad.com/phocus/",
+    "license": "Proprietary brand mark; no open-content license stated",
+    "variant": "white",
+    "sha256": "7f0542d0be51bf8575694957ded65174d3543b9121bec8fb12628c3aace84b93",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/hasselblad-white.svg",
+    "derivedFrom": "Brands/hasselblad.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Hasselblad_logo.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "9f1b2389c8eeafb61a2844272277f0f8ca0b7028a08303d3277dabc50de67e40",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/leica-black.svg",
+    "derivedFrom": "Brands/leica.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Leica_Camera.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "26877f4e7bc5f5e606092b75856e44708a35cd50de92da27d2eed4c0a7337b3b",
+    "processing": "Transparent SVG; black paths on transparent background; red badge circle removed to retain script wordmark"
+  },
+  {
+    "file": "Brands/Variants/leica-original.svg",
+    "derivedFrom": "Brands/leica.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Leica_Camera.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "d5eaff75c490fe7169255f21c801eb4578c3d8042b35079f685af776f87b52a8",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/leica-white.svg",
+    "derivedFrom": "Brands/leica.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Leica_Camera.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "c9c9ce36fe9b8c172480728707f50f9ea8b9ec83e7e7920b11412391eb562f7e",
+    "processing": "Transparent SVG; white paths on transparent background; red badge circle removed to retain script wordmark"
+  },
+  {
+    "file": "Brands/Variants/leica-wordmark-black.svg",
+    "derivedFrom": "Brands/leica.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Leica_Camera.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "26877f4e7bc5f5e606092b75856e44708a35cd50de92da27d2eed4c0a7337b3b",
+    "processing": "Transparent SVG; black paths on transparent background; red badge circle removed to retain script wordmark"
+  },
+  {
+    "file": "Brands/Variants/leica-wordmark-original.svg",
+    "derivedFrom": "Brands/leica.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Leica_Camera.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "26877f4e7bc5f5e606092b75856e44708a35cd50de92da27d2eed4c0a7337b3b",
+    "processing": "Transparent SVG; source colors; red badge circle removed to retain script wordmark"
+  },
+  {
+    "file": "Brands/Variants/leica-wordmark-white.svg",
+    "derivedFrom": "Brands/leica.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Leica_Camera.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "c9c9ce36fe9b8c172480728707f50f9ea8b9ec83e7e7920b11412391eb562f7e",
+    "processing": "Transparent SVG; white paths on transparent background; red badge circle removed to retain script wordmark"
+  },
+  {
+    "file": "Brands/Variants/nikon-black.svg",
+    "derivedFrom": "Brands/nikon.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Nikon_Logo.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "bbe22a54b360fabe750dc4be0c8849976ce091f3ec800227b84ae22b55572e75",
+    "processing": "Transparent SVG; black paths on transparent background; yellow square and rays removed; wordmark viewBox cropped"
+  },
+  {
+    "file": "Brands/Variants/nikon-original.svg",
+    "derivedFrom": "Brands/nikon.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Nikon_Logo.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "f2600a55442a9e19bd488cf92b0b57db0546f4d185798869ff2d4d88f59789ae",
+    "processing": "Transparent SVG; source colors; yellow square and rays removed; wordmark viewBox cropped"
+  },
+  {
+    "file": "Brands/Variants/nikon-white.svg",
+    "derivedFrom": "Brands/nikon.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Nikon_Logo.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "7309a50066fd7d9ed10cc1c8ce3c917241dde111bf20b9f264cd554880c71dc0",
+    "processing": "Transparent SVG; white paths on transparent background; yellow square and rays removed; wordmark viewBox cropped"
+  },
+  {
+    "file": "Brands/Variants/olympus-black.svg",
+    "derivedFrom": "Brands/olympus.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Olympus_Corporation_logo.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "fa3210fc111dcb738f7180ca965228cde040d17f7915838bcd6fdc2c37bbe165",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/olympus-original.svg",
+    "derivedFrom": "Brands/olympus.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Olympus_Corporation_logo.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "38f704e4e7ee7a378b5bfdc517176c10f10005d49bf8ea43aac096b7207335bf",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/olympus-white.svg",
+    "derivedFrom": "Brands/olympus.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Olympus_Corporation_logo.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "4b4c7050f815952c8f3d00949cbe4767e083c8f10b32dfb3a732b0b2c314ec05",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/om-system-black.svg",
+    "derivedFrom": "Brands/om-system.svg",
+    "source": "https://omsystem.com/en/",
+    "license": "Proprietary trademark asset; no open-content license stated",
+    "variant": "black",
+    "sha256": "c26d921c4ab0bfadd725c94746529d0914b6ea2fcf4aa1fee37d7d270dd02b0c",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/om-system-original.svg",
+    "derivedFrom": "Brands/om-system.svg",
+    "source": "https://omsystem.com/en/",
+    "license": "Proprietary trademark asset; no open-content license stated",
+    "variant": "original",
+    "sha256": "23024d25e226e061f9ede2c98ef89296b4724822abc8efca6f333556f528cdbc",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/om-system-white.svg",
+    "derivedFrom": "Brands/om-system.svg",
+    "source": "https://omsystem.com/en/",
+    "license": "Proprietary trademark asset; no open-content license stated",
+    "variant": "white",
+    "sha256": "ee6be2b24c5649efa3cffaeb325c4d890a6826b1286fd9c733d335192b5f2048",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/panasonic-black.svg",
+    "derivedFrom": "Brands/panasonic.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Panasonic_logo_(Blue).svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "d345ba9c89c82cc17843eb5e7e276343c0f92713063907a56ffc3830b6828c85",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/panasonic-original.svg",
+    "derivedFrom": "Brands/panasonic.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Panasonic_logo_(Blue).svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "84b58eb5c160a031ca5d359c69909c7917bfff7b8bceed9940f6bf8272836918",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/panasonic-white.svg",
+    "derivedFrom": "Brands/panasonic.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Panasonic_logo_(Blue).svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "2eb3b7a2efe4ba59d06b3c201562fa8001ba2f147b3da0f8a02ba786aaa9791c",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/pentax-black.svg",
+    "derivedFrom": "Brands/pentax.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Pentax_Logo.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "b7856bab26824722e8afc1bad1e9b4184f68eae8f6a368af7c556f8bafd102bb",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/pentax-original.svg",
+    "derivedFrom": "Brands/pentax.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Pentax_Logo.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "7df167c069b8bb70ccd8e740ae397c8f6eede22919f18889ec584cb1afeb18a9",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/pentax-white.svg",
+    "derivedFrom": "Brands/pentax.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Pentax_Logo.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "292751ec1055bfd522eb2b61fe43a8d62f42c795daa7f79637d464c24a7a46a5",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/ricoh-black.svg",
+    "derivedFrom": "Brands/ricoh.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Ricoh_logo_2005.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "49e33401ba180f79abe31f221011775a3b7ac75d5653bc90daf08c22c069eb7d",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/ricoh-original.svg",
+    "derivedFrom": "Brands/ricoh.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Ricoh_logo_2005.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "3aa9e6d1820eff8a2748802a349a1cf0b1b4a8df3a89b688ca52fa2c93d25221",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/ricoh-white.svg",
+    "derivedFrom": "Brands/ricoh.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Ricoh_logo_2005.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "627d61ef5c5cc4fe24eeac1bb3c852389b375267e6d39300a6cfd0a62ef5ee0e",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/sigma-black.svg",
+    "derivedFrom": "Brands/sigma.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Sigma%27s_new_updated_logo_revealed,_February_2025.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "128e32c00e8acb184ad2eba77dac9953c1ca2d7d747b629b55ac88e7cca12584",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/sigma-original.svg",
+    "derivedFrom": "Brands/sigma.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Sigma%27s_new_updated_logo_revealed,_February_2025.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "f0c023b926389c786993626328c41f70248c65c73365578ca88bdac551198ad4",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/sigma-white.svg",
+    "derivedFrom": "Brands/sigma.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Sigma%27s_new_updated_logo_revealed,_February_2025.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "75eb36d5b26cbdcb3a8b0f4404e2b41b385fb28ec9fc73b5787af912a54af6e2",
+    "processing": "Transparent SVG; white paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/sony-black.svg",
+    "derivedFrom": "Brands/sony.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Sony_logo.svg",
+    "license": "See original source record",
+    "variant": "black",
+    "sha256": "c1cacf335a72cd3ae8f8732f3f50d4783dae08399b8c45bb3da1b17fe2361358",
+    "processing": "Transparent SVG; black paths on transparent background"
+  },
+  {
+    "file": "Brands/Variants/sony-original.svg",
+    "derivedFrom": "Brands/sony.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Sony_logo.svg",
+    "license": "See original source record",
+    "variant": "original",
+    "sha256": "5ff49bf7e3698ef4faad8d7cf2afbf31725e2fb04474de48abaf52ca7e4bd17d",
+    "processing": "Transparent SVG; source colors"
+  },
+  {
+    "file": "Brands/Variants/sony-white.svg",
+    "derivedFrom": "Brands/sony.svg",
+    "source": "https://commons.wikimedia.org/wiki/File:Sony_logo.svg",
+    "license": "See original source record",
+    "variant": "white",
+    "sha256": "6df7b453e25f0156a904291623ea2137ab3eba7d4114c7b86c9ec8227ee44b72",
+    "processing": "Transparent SVG; white paths on transparent background"
+  }
+]

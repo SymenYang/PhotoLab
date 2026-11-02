@@ -39,20 +39,33 @@ actor PhotoEditSession {
             var rendered: CIImage
             if let grade = adjustments.redlamp {
                 let identity = try EditSource.read(source)
-                if previewEngine == nil || previewIdentity != identity {
+                let desiredEdge = max(2048, min(32768, Int(ceil(Double(previewLongEdge) / max(0.01, min(adjustments.cropWidth, adjustments.cropHeight))))))
+                let needsLargerBase = Scanner.rawExtensions.contains(source.pathExtension.lowercased()) && previewEngine.map {
+                    Double(desiredEdge) > max($0.size.width, $0.size.height) + 1 && max($0.size.width, $0.size.height) < max($0.sourceSize.width, $0.sourceSize.height)
+                } == true
+                if previewEngine == nil || previewIdentity != identity || needsLargerBase {
                     previewEngine = nil
-                    previewEngine = try RedlampBackend.preparePreview(source)
+                    previewEngine = try RedlampBackend.preparePreview(source, maxLongEdge: desiredEdge)
                     previewIdentity = identity
                 }
-                let engine = previewEngine!
+                try Task.checkCancellation()
+                var engine = previewEngine!
                 // Budget source pixels for the visible crop, rather than enlarging
                 // a crop taken from an already downsampled full-image preview.
-                let outputSize = PhotoEditStore.geometry(CIImage(color: .clear).cropped(to: CGRect(origin: .zero, size: engine.size)), adjustments: adjustments).extent.size
-                let sourceEdge = max(engine.size.width, engine.size.height)
+                let outputSize = PhotoEditStore.geometry(CIImage(color: .clear).cropped(to: CGRect(origin: .zero, size: engine.sourceSize)), adjustments: adjustments).extent.size
+                let sourceEdge = max(engine.sourceSize.width, engine.sourceSize.height)
                 let outputEdge = max(1, max(outputSize.width, outputSize.height))
                 let decodeEdge = Int(ceil(min(sourceEdge, Double(previewLongEdge) * sourceEdge / outputEdge)))
+                if Scanner.rawExtensions.contains(source.pathExtension.lowercased()),
+                   Double(decodeEdge) > max(engine.size.width, engine.size.height) + 1,
+                   max(engine.size.width, engine.size.height) < sourceEdge {
+                    previewEngine = nil
+                    engine = try RedlampBackend.preparePreview(source, maxLongEdge: decodeEdge)
+                    previewEngine = engine
+                }
+                try Task.checkCancellation()
                 let pixels = try engine.render(grade, previewLongEdge: decodeEdge)
-                let base = CIImage(cgImage: pixels).transformed(by: CGAffineTransform(scaleX: engine.size.width / Double(pixels.width), y: engine.size.height / Double(pixels.height)))
+                let base = CIImage(cgImage: pixels).transformed(by: CGAffineTransform(scaleX: engine.sourceSize.width / Double(pixels.width), y: engine.sourceSize.height / Double(pixels.height)))
                 let geometry = PhotoEditStore.geometry(base, adjustments: adjustments)
                 logicalSize = geometry.extent.size
                 let scale = min(1, Double(previewLongEdge) / max(logicalSize.width, logicalSize.height))
@@ -65,6 +78,7 @@ actor PhotoEditSession {
                 rendered = rendered.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
             }
             if rotation != 0 { rendered = rendered.oriented(rotation == 1 ? .right : rotation == 2 ? .down : .left) }
+            try Task.checkCancellation()
             let cg = try PhotoEditStore.cgImage(rendered)
             try Task.checkCancellation()
             let displayed = rotation % 2 == 0 ? logicalSize : CGSize(width: logicalSize.height, height: logicalSize.width)
@@ -75,6 +89,7 @@ actor PhotoEditSession {
             return image
         }
     }
+    func previewWhiteBalance() -> [String: Double] { previewEngine?.whiteBalance ?? [:] }
     func previewDiagnostics() -> (opens: Int, renders: Int) { (previewEngine?.opens ?? 0, previewEngine?.previews ?? 0) }
     @discardableResult func save(_ adjustments: PhotoAdjustments, cache: Bool, pipelineVersion: Int = 2) throws -> Bool {
         try Task.checkCancellation()
@@ -94,13 +109,89 @@ actor PhotoEditSession {
     @Published private(set) var index = 0
     @Published private(set) var source: URL?
     @Published private(set) var image: NSImage?
+    private var baseImage: NSImage?
+    private var decorationTask: Task<Void, Never>?
+    private var decorationGeneration = UUID()
+    @Published var selectedStickerID: String?
+    @Published private(set) var frameMetadata = FrameMetadata()
+    var decoration: PhotoDecoration { parameters.decoration ?? PhotoDecoration() }
+    func updateDecoration(_ change: (inout PhotoDecoration) -> Void) {
+        var d = decoration; change(&d)
+        do { try d.validate(); parameters.decoration = d; error = nil }
+        catch { self.error = error.localizedDescription }
+    }
+    func addSticker(_ sticker: PhotoSticker) {
+        updateDecoration { $0.stickers.append(sticker) }; selectedStickerID = sticker.id
+    }
+    var decorationPhotoSize: CGSize {
+        let size = baseImage?.size ?? CGSize(width:1000,height:667)
+        return (current?.rotation ?? 0)%2 == 0 ? size : CGSize(width:size.height,height:size.width)
+    }
+    var stickerFontPixelScale: Double {
+        let canvas = DecorationLayout.make(photo: decorationPhotoSize, decoration: decoration).size
+        return max(1,min(canvas.width,canvas.height))
+    }
+    func setStickerFontSize(_ id: String, pixels: Double) {
+        guard pixels.isFinite else { return }
+        let size = min(0.5,max(0.003,pixels/stickerFontPixelScale))
+        updateDecoration { d in
+            guard let i = d.stickers.firstIndex(where: { $0.id == id && $0.kind == "text" }) else { return }
+            d.stickers[i].textSize = size
+        }
+    }
+    func applyInformationPreset(_ template: String) {
+        updateDecoration { $0.addInformationPreset(template, metadata: frameMetadata, photo: decorationPhotoSize) }
+        selectedStickerID = decoration.stickers.first(where: { $0.templateSlot != nil })?.id
+    }
+    func applyDecorationPreset(_ value: PhotoDecoration) {
+        parameters.decoration = value.migrated(metadata: frameMetadata, photo: decorationPhotoSize)
+        selectedStickerID = nil
+    }
+    private func composePreview() {
+        decorationTask?.cancel(); decorationGeneration = UUID()
+        guard let baseImage, let cg = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        if let old = parameters.decoration,
+           case let converted = old.migrated(metadata: frameMetadata, photo: decorationPhotoSize), converted != old {
+            let wasReady = ready; ready = false
+            parameters.decoration = converted
+            if lastSaved.decoration == old { lastSaved.decoration = converted }
+            ready = wasReady
+        }
+        guard !showOriginal, cropDraft == nil, decoration.active else { image = baseImage; return }
+        let d = decoration, metadata = frameMetadata, rotation = current?.rotation ?? 0
+        let token = decorationGeneration, key = generation, logical = baseImage.size
+        decorationTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(25))
+                let worker = Task.detached(priority: .userInitiated) {
+                    try Task.checkCancellation()
+                    let composed = try PhotoDecorationRenderer.compose(CIImage(cgImage: cg), decoration: d, metadata: metadata, rotation: rotation)
+                    try Task.checkCancellation()
+                    let pixels = try PhotoEditStore.cgImage(composed)
+                    try Task.checkCancellation()
+                    return pixels
+                }
+                let result = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                guard !Task.isCancelled, token == decorationGeneration, key == generation else { return }
+                let upright = rotation % 2 == 0 ? logical : CGSize(width: logical.height, height: logical.width)
+                let framed = DecorationLayout.make(photo: upright, decoration: d).size
+                let size = rotation % 2 == 0 ? framed : CGSize(width: framed.height, height: framed.width)
+                let bitmap = NSBitmapImageRep(cgImage: result); bitmap.size = size
+                let output = NSImage(size: size); output.addRepresentation(bitmap); image = output
+            } catch { if !Task.isCancelled, key == generation { self.error = error.localizedDescription } }
+        }
+    }
     @Published private(set) var loading = false
     @Published private(set) var rendering = false
     @Published private(set) var saving = false
     @Published private(set) var finishing = false
     @Published private(set) var sourceDefaults = PhotoAdjustments()
     @Published var pipelineVersion = 2 { didSet {
-        if ready && pipelineVersion != oldValue { autoCrop.clear(); render(); scheduleSave() }
+        if ready && pipelineVersion != oldValue { autoCrop.clear(); render(); markDraftChanged() }
     } }
     private var lastSavedPipeline = 2
     var isRAW: Bool { source.map { Scanner.rawExtensions.contains($0.pathExtension.lowercased()) } ?? false }
@@ -210,15 +301,45 @@ actor PhotoEditSession {
     }
     private func colorResetPreservingCrop() -> PhotoAdjustments {
         var updated = sourceDefaults
+        updated.decoration = parameters.decoration
         updated.quarterTurns = parameters.quarterTurns; updated.straighten = parameters.straighten
         updated.cropX = parameters.cropX; updated.cropY = parameters.cropY
         updated.cropWidth = parameters.cropWidth; updated.cropHeight = parameters.cropHeight
         return updated
     }
     func switchToRedlamp() { parameters = colorResetPreservingCrop() }
+    @Published private(set) var renderedColorWhiteBalance: [String: Double] = [:]
+    func colorWhiteBalanceValue(_ key: String) -> Double {
+        let fallback = key == "wb.temperature" ? 5500.0 : 0.0
+        guard let grade = parameters.redlamp else { return fallback }
+        if grade.whiteBalance == "custom" { return grade.values[key] ?? fallback }
+        if grade.whiteBalance == "asShot" { return fallback }
+        return renderedColorWhiteBalance[key] ?? fallback
+    }
+    private func preserveRenderedWhiteBalance(_ grade: inout RedlampGrade) throws {
+        guard grade.whiteBalance != "custom" else { return }
+        try grade.set("wb.temperature", value: colorWhiteBalanceValue("wb.temperature"))
+        try grade.set("wb.tint", value: colorWhiteBalanceValue("wb.tint"))
+    }
     func setColor(_ key: String, value: Double) {
         guard !aiRunning, var grade = parameters.redlamp else { return }
-        do { try grade.set(key, value: value); parameters.redlamp = grade }
+        do {
+            if key == "wb.temperature" || key == "wb.tint" { try preserveRenderedWhiteBalance(&grade) }
+            try grade.set(key, value: value); parameters.redlamp = grade
+        }
+        catch { self.error = error.localizedDescription }
+    }
+    func setColorField(_ key: String, value: Any) {
+        guard !aiRunning, var grade = parameters.redlamp else { return }
+        do {
+            if key == "whiteBalance", value as? String == "custom" { try preserveRenderedWhiteBalance(&grade) }
+            try grade.setField(key, value: value); parameters.redlamp = grade
+        }
+        catch { self.error = error.localizedDescription }
+    }
+    func setColorCurve(_ key: String, points: [GradeCurvePoint]) {
+        guard !aiRunning, var grade = parameters.redlamp else { return }
+        do { try grade.setCurve(key, points: points); parameters.redlamp = grade }
         catch { self.error = error.localizedDescription }
     }
     @Published var error: String?
@@ -297,7 +418,8 @@ actor PhotoEditSession {
             guard ready, parameters != oldValue else { return }
             if !aiRunning { englishPrompt = parameters.redlamp?.englishPrompt ?? "" }
             if !restoring && dragStart == nil { undoValues.append(oldValue); if undoValues.count > 100 { undoValues.removeFirst() }; redoValues = [] }
-            autoCrop.clear(); render(); scheduleSave()
+            if parameters.photoOnly != oldValue.photoOnly { autoCrop.clear(); render() } else { composePreview() }
+            markDraftChanged()
         }
     }
     @Published private(set) var undoValues: [PhotoAdjustments] = []
@@ -323,33 +445,40 @@ actor PhotoEditSession {
     private var previewDisplayEdge = 2048
     @Published private(set) var previewPixels = CGSize.zero
     @Published private(set) var previewMilliseconds = 0.0
-    private var saveTask: Task<Void, Never>?
-    var onChange: (() -> Void)?
+    var onCommit: ((String) -> Void)?
+    var onBatchChange: ((Set<String>) -> Void)?
+    private var decorationBatchIDs: Set<String> = []
+    var decorationTargets: [EditablePhoto] { photos.filter { decorationBatchIDs.contains($0.id) } }
     var onSelect: ((String) -> Void)?
     var current: EditablePhoto? { photos.indices.contains(index) ? photos[index] : nil }
-    var canEdit: Bool { ready }
+    var canEdit: Bool { ready && baseImage != nil }
     var unsaved: Bool { ready && (parameters != lastSaved || pipelineVersion != lastSavedPipeline || (cropDraft != nil && cropDraft != parameters)) }
-    func open(_ photos: [EditablePhoto], selectedID: String) {
+    func open(_ photos: [EditablePhoto], selectedID: String, batchIDs: Set<String> = []) {
         guard !isPresented, !photos.isEmpty else { return }
+        decorationBatchIDs = batchIDs.isEmpty ? [selectedID] : batchIDs
         self.photos = photos; index = photos.firstIndex { $0.id == selectedID } ?? 0
         isPresented = true; load()
     }
     private func load(source explicit: URL? = nil) {
         guard let current else { return }
         cancelAI(); colorPrompt = ""; englishPrompt = ""; aiError = nil; aiStatus = ""
-        loadTask?.cancel(); stopPreview(); saveTask?.cancel(); generation = UUID()
+        loadTask?.cancel(); stopPreview(); generation = UUID()
         let key = generation
         ready = false; cropDraft = nil; tab = "ai"; loading = true; rendering = false; saving = false; error = nil; image = nil; undoValues = []; redoValues = []; dragStart = nil; showOriginal = false
-        source = nil; session = nil
+        source = nil; session = nil; renderedColorWhiteBalance = [:]; baseImage = nil; selectedStickerID = nil
+        decorationTask?.cancel(); frameMetadata = FrameMetadata()
         status = "正在检查编辑记录…"
         loadTask = Task {
             do {
                 let discovered = explicit == nil ? try await PhotoEditStore.findPreferredSource(current.sources) : nil
                 guard !Task.isCancelled, key == generation else { return }
                 let preferred = explicit ?? discovered ?? current.sources.first(where: { Scanner.rawExtensions.contains($0.pathExtension.lowercased()) }) ?? current.sources[0]
+                let metadata = await Task.detached { FrameMetadata.read(preferred) }.value
+                guard !Task.isCancelled, key == generation else { return }
+                frameMetadata = metadata
                 source = preferred
                 let session = PhotoEditSession(source: preferred); self.session = session
-                status = "正在读取全分辨率原片…"
+                status = "正在准备编辑预览…"
                 let (settings, exists, defaults, pipeline) = try await session.load()
                 guard !Task.isCancelled, key == generation else { return }
                 sourceDefaults = defaults; pipelineVersion = pipeline; lastSavedPipeline = pipeline; parameters = settings; lastSaved = settings; self.exists = exists; ready = true; loading = false
@@ -370,6 +499,7 @@ actor PhotoEditSession {
     private func render() {
         guard ready, let session else { return }
         var settings = showOriginal ? sourceDefaults : (cropDraft ?? parameters)
+        settings.decoration = nil
         let pipeline = pipelineVersion
         let cropping = cropDraft != nil, rotation = cropping ? (current?.rotation ?? 0) : 0, key = generation
         if cropping { settings.straighten = 0; settings.cropX = 0; settings.cropY = 0; settings.cropWidth = 1; settings.cropHeight = 1 }
@@ -384,8 +514,11 @@ actor PhotoEditSession {
                 do {
                     let started = Date()
                     let result = try await session.render(request.settings, rotation: request.rotation, pipelineVersion: request.pipeline, previewLongEdge: request.edge)
+                    try Task.checkCancellation()
+                    let balance = await session.previewWhiteBalance()
                     guard !Task.isCancelled, key == generation, run == previewRun else { return }
-                    image = result
+                    renderedColorWhiteBalance = balance
+                    baseImage = result; composePreview()
                     previewPixels = result.representations.first.map { CGSize(width: $0.pixelsWide, height: $0.pixelsHigh) } ?? .zero
                     previewMilliseconds = Date().timeIntervalSince(started) * 1000
                     if request.cropping && cropDraft != nil { fitCropRatio() }
@@ -397,30 +530,17 @@ actor PhotoEditSession {
             if key == generation && run == previewRun { rendering = false; renderTask = nil }
         }
     }
-    private func scheduleSave() {
-        saveTask?.cancel(); status = "有调整待保存…"
-        let settings = parameters, key = generation, pipeline = pipelineVersion
-        guard let session else { return }
-        saveTask = Task {
-            do {
-                try await Task.sleep(for: .milliseconds(900))
-                saving = true
-                defer { if key == generation { saving = false } }
-                let retained = try await session.save(settings, cache: false, pipelineVersion: pipeline)
-                if key == generation {
-                    lastSaved = settings; lastSavedPipeline = pipeline; exists = retained; error = nil
-                    onChange?()
-                    status = !retained ? "已恢复原图 · 已清除无改动的编辑记录" : parameters == settings && pipelineVersion == pipeline ? "调整参数已自动保存 · 完成后生成完整缓存" : "有调整待保存…"
-                }
-            } catch { if !Task.isCancelled && key == generation { self.error = error.localizedDescription; status = "保存失败，修改尚未落盘" } }
-        }
+    private func markDraftChanged() {
+        // A draft never changes the sidecar or invalidates library analysis.
+        status = unsaved ? "有未保存的修改 · 点击完成保存，关闭则放弃本次修改" : "与打开时一致 · 无需保存"
     }
     func sliderEditing(_ active: Bool) {
         if active { dragStart = parameters }
         else {
             if let start = dragStart, start != parameters { undoValues.append(start); redoValues = [] }
+            let changedPhoto = dragStart.map { $0.photoOnly != parameters.photoOnly } ?? false
             dragStart = nil
-            render()
+            if changedPhoto { render() }
         }
     }
     func undo() {
@@ -433,27 +553,39 @@ actor PhotoEditSession {
     }
     func complete(next: Int? = nil, source: URL? = nil) {
         guard !finishing, !loading, cropDraft == nil || !rendering else { return }
+        if let next, !photos.indices.contains(next) { return }
+        if let source, current?.sources.contains(source) != true { return }
         cancelAI()
         if cropDraft != nil { applyCrop() }
         if !ready { if next == nil && source == nil { close() }; return }
-        saveTask?.cancel(); stopPreview(); finishing = true; status = "正在生成全分辨率编辑结果…"
-        let settings = parameters, session = session, pipeline = pipelineVersion, shouldSave = exists || parameters.hasEffectiveChanges
+        guard let session, let photoID = current?.id else { return }
+        stopPreview(); finishing = true; saving = true; status = "正在保存编辑结果…"
+        let settings = parameters, pipeline = pipelineVersion
+        let shouldSave = unsaved && (exists || parameters.hasEffectiveChanges)
         Task {
             do {
-                if shouldSave { let retained = try await session?.save(settings, cache: true, pipelineVersion: pipeline) ?? false; lastSaved = settings; lastSavedPipeline = pipeline; exists = retained; onChange?() }
-                finishing = false; error = nil
+                if shouldSave { let retained = try await session.save(settings, cache: true, pipelineVersion: pipeline); lastSaved = settings; lastSavedPipeline = pipeline; exists = retained; onCommit?(photoID) }
+                finishing = false; saving = false; error = nil
                 if let next { index = next; load() }
                 else if let source { load(source: source) }
                 else { close() }
-            } catch { finishing = false; self.error = error.localizedDescription; status = "未完成保存，当前调整仍保留在编辑器中"; render() }
+            } catch { finishing = false; saving = false; self.error = error.localizedDescription; status = "未完成保存，当前调整仍保留在编辑器中"; render() }
         }
+    }
+    func discardAndSwitch(next: Int? = nil, source: URL? = nil) {
+        guard !finishing, !loading else { return }
+        if let next, photos.indices.contains(next) { index = next; load() }
+        else if let source, current?.sources.contains(source) == true { load(source: source) }
     }
     func reload() { guard !finishing && !saving else { return }; load(source: source) }
     func close() {
+        guard !finishing else { return }
         cancelAI()
         autoCrop.clear()
-        loadTask?.cancel(); stopPreview(); saveTask?.cancel(); generation = UUID(); ready = false
-        cropDraft = nil; tab = "ai"; image = nil; session = nil; isPresented = false; onChange?()
+        loadTask?.cancel(); stopPreview(); generation = UUID(); ready = false
+        cropDraft = nil; tab = "ai"; image = nil; baseImage = nil; decorationTask?.cancel(); decorationTask = nil; decorationGeneration = UUID(); session = nil; isPresented = false
+        parameters = lastSaved; pipelineVersion = lastSavedPipeline; undoValues = []; redoValues = []; dragStart = nil
+        loading = false; rendering = false; saving = false
     }
 }
 
@@ -463,6 +595,9 @@ struct PhotoEditorView: View {
     @State private var reset = 0
     @State private var confirmClose = false
     @State private var confirmReload = false
+    @State private var confirmSwitch = false
+    @State private var nextPhoto: Int?
+    @State private var nextSource: URL?
     var inspectorOnly = false
     var body: some View {
         Group {
@@ -474,19 +609,29 @@ struct PhotoEditorView: View {
         .onChange(of: editor.source) { _, _ in zoom = 1; reset += 1 }
         .alert("放弃尚未保存的调整？", isPresented: $confirmClose) {
             Button("继续编辑", role: .cancel) {}
-            Button("关闭", role: .destructive) { editor.close() }
-        } message: { Text("已经自动保存的参数会保留；尚未保存的修改将丢失。") }
+            Button("放弃本次修改并关闭", role: .destructive) { editor.close() }
+        } message: { Text("将放弃本次打开编辑器后的全部修改，保留此前已保存的编辑结果。") }
+        .alert("切换前保存本次修改？", isPresented: $confirmSwitch) {
+            Button("保存并切换") { editor.complete(next: nextPhoto, source: nextSource) }
+            Button("放弃修改并切换", role: .destructive) { editor.discardAndSwitch(next: nextPhoto, source: nextSource) }
+            Button("继续编辑", role: .cancel) {}
+        } message: { Text("保存后会更新照片的分析结果；放弃修改会保留此前已保存的版本。") }
         .alert("重新读取磁盘上的编辑文件？", isPresented: $confirmReload) {
             Button("取消", role: .cancel) {}
             Button("重新读取", role: .destructive) { editor.reload() }
         } message: { Text("将放弃当前尚未保存的调整，不覆盖磁盘上的编辑文件。") }
     }
+    private func requestSwitch(next: Int? = nil, source: URL? = nil) {
+        nextPhoto = next; nextSource = source
+        if editor.unsaved { confirmSwitch = true }
+        else { editor.discardAndSwitch(next: next, source: source) }
+    }
     private var header: some View {
             HStack {
                 Text(editor.current?.name ?? "照片编辑").font(.headline).lineLimit(1)
                 Spacer()
-                Button("上一张") { editor.complete(next: editor.index - 1) }.disabled(editor.index == 0 || editor.loading || (editor.cropDraft != nil && editor.rendering))
-                Button("下一张") { editor.complete(next: editor.index + 1) }.disabled(editor.index + 1 >= editor.photos.count || editor.loading || (editor.cropDraft != nil && editor.rendering))
+                Button("上一张") { requestSwitch(next: editor.index - 1) }.disabled(editor.index == 0 || editor.loading || (editor.cropDraft != nil && editor.rendering))
+                Button("下一张") { requestSwitch(next: editor.index + 1) }.disabled(editor.index + 1 >= editor.photos.count || editor.loading || (editor.cropDraft != nil && editor.rendering))
                 Button { NSApp.keyWindow?.toggleFullScreen(nil) } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.help("进入 / 退出全屏").accessibilityLabel("编辑全屏")
                 Button("关闭") { if editor.unsaved { confirmClose = true } else { editor.close() } }.disabled(editor.saving)
                 Button(editor.finishing ? "正在保存…" : "完成") { editor.complete() }.buttonStyle(.borderedProminent).disabled(editor.loading || (editor.cropDraft != nil && editor.rendering))
@@ -500,6 +645,8 @@ struct PhotoEditorView: View {
                             if let image = editor.image {
                                 if editor.cropDraft != nil {
                                     PhotoCropCanvas(image: image, angle: editor.cropDraft?.straighten ?? 0, zoom: $zoom, rect: Binding(get: { editor.displayCrop }, set: { editor.displayCrop = $0 }), aspect: editor.cropAspect, denseGrid: editor.rotatingCrop, onPreviewSize: editor.updatePreviewSize).disabled(editor.rendering)
+                                } else if editor.tab == "decorate" && !editor.showOriginal {
+                                    PhotoDecorationCanvas(editor: editor, image: image)
                                 } else {
                                     ZoomImage(image: image, zoom: zoom, hdr: false, resetID: reset, rotation: editor.current?.rotation ?? 0, preserveViewport: true, onPreviewSize: editor.updatePreviewSize)
                                 }
@@ -509,6 +656,7 @@ struct PhotoEditorView: View {
                         }
                         .overlay(alignment: .bottomLeading) {
                             HStack {
+                                if editor.tab != "decorate" {
                                 Button("适合窗口") { zoom = 1; reset += 1 }
                                 Button("100%") {
                                     guard let image = editor.image else { return }
@@ -522,6 +670,7 @@ struct PhotoEditorView: View {
                                 if editor.cropDraft != nil {
                                     Button { zoom = max(1, zoom / 1.25) } label: { Image(systemName: "minus.magnifyingglass") }.accessibilityLabel("缩小裁剪画面")
                                     Button { zoom = min(32, zoom * 1.25) } label: { Image(systemName: "plus.magnifyingglass") }.accessibilityLabel("放大裁剪画面")
+                                }
                                 }
                                 Toggle("查看原图", isOn: $editor.showOriginal).toggleStyle(.button).disabled(editor.cropDraft != nil)
                                 if let image = editor.image { Text("\(Int(image.size.width)) × \(Int(image.size.height))").font(.caption.monospacedDigit()) }
@@ -542,17 +691,19 @@ struct PhotoEditorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         if let current = editor.current {
-                            Picker("编辑输入", selection: Binding(get: { editor.source?.path ?? "" }, set: { editor.complete(source: URL(fileURLWithPath: $0)) })) {
+                            Picker("编辑输入", selection: Binding(get: { editor.source?.path ?? "" }, set: { requestSwitch(source: URL(fileURLWithPath: $0)) })) {
                                 ForEach(current.sources, id: \.path) { url in Text(url.lastPathComponent).tag(url.path) }
                             }.disabled(editor.loading || editor.saving || (editor.cropDraft != nil && editor.rendering))
                         }
-                        Text("RAW 与直出分别保存编辑记录；切换输入前会完成当前编辑。").font(.caption).foregroundStyle(.secondary)
-                        Picker("工具", selection: $editor.tab) { Text("AI 调色").tag("ai"); Text("手动调色").tag("manual"); Text("裁切").tag("crop") }.pickerStyle(.segmented).labelsHidden().disabled(editor.aiRunning)
+                        Text("RAW 与直出分别保存编辑记录；有未保存修改时，切换输入会询问是否保存。").font(.caption).foregroundStyle(.secondary)
+                        Picker("工具", selection: $editor.tab) { Text("AI 调色").tag("ai"); Text("手动调色").tag("manual"); Text("裁切").tag("crop"); Text("边框贴纸").tag("decorate") }.pickerStyle(.segmented).controlSize(.small).labelsHidden().disabled(editor.aiRunning)
                         Group {
                         if editor.tab == "ai" {
                             aiPanel
                         } else if editor.tab == "manual" {
                             manualPanel
+                        } else if editor.tab == "decorate" {
+                            PhotoDecorationPanel(editor: editor)
                         } else {
                             Text("拖动边角裁剪，框内拖动移动选区。捏合缩放，双指滚动平移画面。").font(.caption).foregroundStyle(.secondary)
                             Picker("比例", selection: $editor.cropRatio) {
@@ -578,7 +729,7 @@ struct PhotoEditorView: View {
                                 Button("取消") { editor.cancelCrop() }.keyboardShortcut(.escape, modifiers: [])
                                 Button("应用裁剪") { editor.applyCrop() }.buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: []).disabled(editor.rendering)
                             }
-                            Text("应用前的裁切和旋转不会自动保存。切换模块会取消本次裁切；完成编辑会应用当前裁切。").font(.caption).foregroundStyle(.secondary)
+                            Text("应用裁剪只更新编辑预览，点击完成才保存。切换模块会取消未应用的裁切。").font(.caption).foregroundStyle(.secondary)
                             AutoCropPanel(editor: editor, search: editor.autoCrop)
 
                         }
@@ -588,7 +739,7 @@ struct PhotoEditorView: View {
                             Button("重做") { editor.redo() }.disabled(editor.redoValues.isEmpty || editor.cropDraft != nil)
                         }.disabled(editor.aiRunning)
                         Button("恢复原图") { editor.resetAdjustments() }.disabled(editor.cropDraft != nil || editor.aiRunning)
-                        Text("调整自动保存到原片旁，完成后默认显示编辑结果。原片保持不变。当前输出为 SDR。").font(.caption).foregroundStyle(.secondary)
+                        Text("点击完成后保存到原片旁，并更新分析结果；关闭则放弃本次修改。原片保持不变。当前输出为 SDR。").font(.caption).foregroundStyle(.secondary)
                         if let error = editor.error {
                             Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
                             Button("重试保存") { editor.complete() }.disabled(editor.loading)
@@ -612,7 +763,7 @@ struct PhotoEditorView: View {
                 Button("电影感") { editor.colorPrompt = "电影感，保留自然肤色，柔和高光，冷色阴影" }
             }.buttonStyle(.borderless).disabled(editor.aiRunning)
             Text("中文先用 Apple 系统翻译为英文，不替换专名或术语。检查并编辑英文后，再生成调色。翻译在设备上完成，首次可能需要下载语言资源；照片和文字不上传。每次重新生成会替换调色、保留裁切。").font(.caption).foregroundStyle(.secondary)
-            if editor.isRAW { Text("RAW 先由 Redlamp 中性显影为 RGB；模型看到的和参数作用的都是这份 RGB 底图。").font(.caption).foregroundStyle(.secondary) }
+            if editor.isRAW { Text("RAW 按预览尺寸显影为 RGB 供模型分析；完成编辑或导出时再处理全尺寸原片。").font(.caption).foregroundStyle(.secondary) }
             if editor.parameters.redlamp == nil { Text("正在显示旧版编辑。生成成功后会替换旧调色，可撤销；不会叠加两套引擎。").font(.caption).foregroundStyle(.orange) }
             if editor.aiRunning {
                 HStack { ProgressView().controlSize(.small); Button(editor.isTranslating ? "取消翻译" : "取消生成") { editor.cancelAI() } }
@@ -651,7 +802,14 @@ struct PhotoEditorView: View {
                 }
                 DisclosureGroup("白平衡 / 颜色") {
                     VStack(spacing: 16) {
-                        Text("RGB 相对偏移；保留 AI 导入的白平衡模式，不重新显影 RAW。").font(.caption).foregroundStyle(.secondary)
+                        Picker("白平衡", selection: Binding(get: { editor.parameters.redlamp?.whiteBalance ?? "asShot" }, set: { editor.setColorField("whiteBalance", value: $0) })) {
+                            Text("原始").tag("asShot")
+                            Text("自动").tag("auto")
+                            Text("自定义").tag("custom")
+                        }.disabled(editor.rendering && editor.parameters.redlamp?.whiteBalance == "auto")
+                        colorControls(ManualColorControl.whiteBalance)
+                            .disabled(editor.rendering && editor.parameters.redlamp?.whiteBalance != "custom")
+                        Text("色温越高越暖；色调从绿色偏向洋红。5500 K、色调 0 保持底图颜色。").font(.caption).foregroundStyle(.secondary)
                         colorControl("红色偏移", "wb.shift.red")
                         colorControl("蓝色偏移", "wb.shift.blue")
                         colorControl("自然饱和度", "basic.vibrance")
@@ -663,7 +821,8 @@ struct PhotoEditorView: View {
                         colorControl("纹理", "basic.texture"); colorControl("清晰度", "basic.clarity"); colorControl("去朦胧", "basic.dehaze")
                     }.padding(.top, 10)
                 }
-                DisclosureGroup("HSL · 颜色混合器") {
+                Toggle("黑白", isOn: Binding(get: { editor.parameters.redlamp?.blackAndWhite ?? false }, set: { editor.setColorField("treatment", value: $0 ? "blackAndWhite" : "color") }))
+                DisclosureGroup(editor.parameters.redlamp?.blackAndWhite == true ? "HSL / 黑白混色" : "HSL · 颜色混合器") {
                     VStack(spacing: 12) {
                         ForEach([("红", "red"), ("橙", "orange"), ("黄", "yellow"), ("绿", "green"), ("青", "aqua"), ("蓝", "blue"), ("紫", "purple"), ("洋红", "magenta")], id: \.1) { color in
                             DisclosureGroup(color.0) {
@@ -676,13 +835,137 @@ struct PhotoEditorView: View {
                         }
                     }.padding(.top, 10)
                 }
-                Text("手动微调直接修改同一份 Redlamp 配方；AI 的曲线、分级等已导入操作继续保留。蒙版、几何和 Adobe profile 不在本版调色范围内。").font(.caption).foregroundStyle(.secondary)
+                pointCurvePanel
+                colorGroup("参数曲线", ManualColorControl.curveTone)
+                gradingPanel
+                colorGroup("锐化", ManualColorControl.sharpening)
+                colorGroup("降噪", ManualColorControl.noise)
+                colorGroup("暗角 · 高光优先", ManualColorControl.vignette)
+                colorGroup("颗粒", ManualColorControl.grain)
+                Text("可继续调整 AI 生成的参数和曲线，支持撤销、重做；点击完成后保存。").font(.caption).foregroundStyle(.secondary)
                 Button("仅重置调色，保留裁切") { editor.switchToRedlamp() }
             }
         }.disabled(editor.aiRunning)
     }
-    private func colorControl(_ title: String, _ key: String, _ range: ClosedRange<Double> = -100...100, step: Double = 1) -> some View {
-        PhotoAdjustmentControl(title: title, value: Binding(get: { editor.parameters.redlamp?.values[key] ?? 0 }, set: { editor.setColor(key, value: $0) }), range: range, step: step, sliderEditing: editor.sliderEditing, decimalPlaces: step < 1 ? 2 : 0)
+    private var pointCurvePanel: some View {
+        DisclosureGroup("点曲线 · RGB / 通道") {
+            VStack(spacing: 12) {
+                ForEach(Array(zip(["RGB 总曲线", "红通道", "绿通道", "蓝通道"], RedlampGrade.curveKeys)), id: \.1) { title, key in
+                    DisclosureGroup(title) {
+                        GradeCurveEditor(points: Binding(get: { editor.parameters.redlamp?.curve(key) ?? [] }, set: { editor.setColorCurve(key, points: $0) }), editing: editor.sliderEditing)
+                            .padding(.top, 8)
+                    }
+                }
+            }.padding(.top, 10)
+        }
+    }
+    private var gradingPanel: some View {
+        DisclosureGroup("色彩分级") {
+            VStack(spacing: 16) {
+                ForEach([("阴影", "shadows"), ("中间调", "midtones"), ("高光", "highlights"), ("全局", "global")], id: \.1) { title, band in
+                    colorGroup(title, ManualColorControl.grading(band))
+                }
+                colorControls(ManualColorControl.gradingMix)
+            }.padding(.top, 10)
+        }
+    }
+    private func colorGroup(_ title: String, _ controls: [ManualColorControl]) -> some View {
+        DisclosureGroup(title) { colorControls(controls).padding(.top, 10) }
+    }
+    private func colorControls(_ controls: [ManualColorControl]) -> some View {
+        VStack(spacing: 16) {
+            ForEach(controls) { control in
+                colorControl(control.title, control.key, control.range, step: control.step, defaultValue: control.defaultValue)
+            }
+        }
+    }
+    private func colorControl(_ title: String, _ key: String, _ range: ClosedRange<Double> = -100...100, step: Double = 1, defaultValue: Double = 0) -> some View {
+        PhotoAdjustmentControl(title: title, value: Binding(get: { (key == "wb.temperature" || key == "wb.tint") ? editor.colorWhiteBalanceValue(key) : (editor.parameters.redlamp?.values[key] ?? defaultValue) }, set: { editor.setColor(key, value: $0) }), range: range, step: step, sliderEditing: editor.sliderEditing, decimalPlaces: step < 1 ? 2 : 0)
+    }
+}
+
+struct GradeCurveEditor: View {
+    @Binding var points: [GradeCurvePoint]
+    let editing: (Bool) -> Void
+    @State private var selected = 0
+    @State private var dragging = false
+    private var validSelection: Bool { points.indices.contains(selected) }
+    private func move(_ index: Int, x: Double, y: Double) {
+        guard points.indices.contains(index) else { return }
+        let lower = index == 0 ? 0 : points[index - 1].x + 0.0001
+        let upper = index == points.count - 1 ? 1 : points[index + 1].x - 0.0001
+        guard lower <= upper else { return }
+        var updated = points
+        updated[index] = GradeCurvePoint(x: min(upper, max(lower, x)), y: min(1, max(0, y)))
+        points = updated
+    }
+    private func addPoint() {
+        guard points.count >= 2, points.count < 256 else { return }
+        let index = (0..<(points.count - 1)).max { points[$0 + 1].x - points[$0].x < points[$1 + 1].x - points[$1].x }!
+        let left = points[index], right = points[index + 1]
+        var updated = points
+        updated.insert(.init(x: (left.x + right.x) / 2, y: (left.y + right.y) / 2), at: index + 1)
+        points = updated; selected = index + 1
+    }
+    var body: some View {
+        VStack(spacing: 10) {
+            GeometryReader { geometry in
+                let width = geometry.size.width, height = geometry.size.height
+                ZStack {
+                    RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.3))
+                    Path { path in
+                        for n in 1...3 {
+                            let f = CGFloat(n) / 4
+                            path.move(to: CGPoint(x: width * f, y: 0)); path.addLine(to: CGPoint(x: width * f, y: height))
+                            path.move(to: CGPoint(x: 0, y: height * f)); path.addLine(to: CGPoint(x: width, y: height * f))
+                        }
+                        path.move(to: CGPoint(x: 0, y: height)); path.addLine(to: CGPoint(x: width, y: 0))
+                    }.stroke(.secondary.opacity(0.3), lineWidth: 1)
+                    Path { path in
+                        for (index, point) in NativeColorEngine.curveSamples(points).enumerated() {
+                            let position = CGPoint(x: point.x * width, y: (1 - point.y) * height)
+                            if index == 0 { path.move(to: position) } else { path.addLine(to: position) }
+                        }
+                    }.stroke(.primary, lineWidth: 1.5)
+                    ForEach(points.indices, id: \.self) { index in
+                        Circle().fill(index == selected ? Color.accentColor : .white)
+                            .frame(width: 9, height: 9)
+                            .position(x: points[index].x * width, y: (1 - points[index].y) * height)
+                    }
+                }
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { event in
+                    if !dragging {
+                        selected = points.indices.min { a, b in
+                            hypot(points[a].x * width - event.startLocation.x, (1 - points[a].y) * height - event.startLocation.y)
+                                < hypot(points[b].x * width - event.startLocation.x, (1 - points[b].y) * height - event.startLocation.y)
+                        } ?? 0
+                        dragging = true; editing(true)
+                    }
+                    move(selected, x: event.location.x / max(1, width), y: 1 - event.location.y / max(1, height))
+                }.onEnded { _ in dragging = false; editing(false) })
+            }.frame(height: 180).accessibilityLabel("曲线控制点，下面可精确编辑输入和输出值")
+            Text("拖动控制点，或输入精确值；横轴为输入，纵轴为输出。").font(.caption2).foregroundStyle(.secondary)
+            Picker("控制点", selection: $selected) {
+                ForEach(points.indices, id: \.self) { index in Text("点 \(index + 1)").tag(index) }
+            }
+            if validSelection {
+                PhotoAdjustmentControl(title: "输入", value: Binding(get: { validSelection ? points[selected].x * 255 : 0 }, set: { if validSelection { move(selected, x: $0 / 255, y: points[selected].y) } }), range: 0...255, step: 1, sliderEditing: editing, decimalPlaces: 1)
+                PhotoAdjustmentControl(title: "输出", value: Binding(get: { validSelection ? points[selected].y * 255 : 0 }, set: { if validSelection { move(selected, x: points[selected].x, y: $0 / 255) } }), range: 0...255, step: 1, sliderEditing: editing, decimalPlaces: 1)
+            }
+            HStack {
+                Button("添加点", action: addPoint).disabled(points.count >= 256)
+                Button("删除点") {
+                    guard validSelection, points.count > 2 else { return }
+                    var updated = points; updated.remove(at: selected)
+                    selected = min(selected, updated.count - 1); points = updated
+                }.disabled(points.count <= 2)
+                Spacer()
+                Button("重置通道") { selected = 0; points = [.init(x: 0, y: 0), .init(x: 1, y: 1)] }
+            }.font(.caption)
+        }
+        .onChange(of: points.count) { _, count in selected = min(selected, max(0, count - 1)) }
+        .onDisappear { if dragging { dragging = false; editing(false) } }
     }
 }
 

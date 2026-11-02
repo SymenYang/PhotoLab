@@ -1,0 +1,65 @@
+{
+  "brand": "canon",
+  "file": "canon.svg",
+  "source": "https://commons.wikimedia.org/wiki/File:Canon_wordmark.svg",
+  "download": "https://upload.wikimedia.org/wikipedia/commons/0/0a/Canon_wordmark.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+  "retrieved": "2026-10-30",
+  "sha256": "b6c0983237b9e41336d2b0ae913fb6e4e25b6577d896a6deb67d7e61ada18a54",
+  "metadata": {
+    "DateTime": {
+      "value": "2022-10-19 18:19:12",
+      "source": "mediawiki-metadata",
+      "hidden": ""
+    },
+    "ObjectName": {
+      "value": "Canon wordmark",
+      "source": "mediawiki-metadata"
+    },
+    "CommonsMetadataExtension": {
+      "value": 1.2,
+      "source": "extension",
+      "hidden": ""
+    },
+    "Categories": {
+      "value": "Files with no machine-readable author|Files with no machine-readable source|With trademark|Media missing infobox template|PD textlogo|SVG simple text logos|Valid SVG created with Inkscape:Text logos|Red alphabet logos of Japan|Canon logos|SVG logos of manufacturing companies of Japan|SVG logos of technology companies",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "Assessments": {
+      "value": "",
+      "source": "commons-categories",
+      "hidden": ""
+    },
+    "LicenseShortName": {
+      "value": "Public domain",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "UsageTerms": {
+      "value": "Public domain",
+      "source": "commons-desc-page"
+    },
+    "AttributionRequired": {
+      "value": "false",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Copyrighted": {
+      "value": "False",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "Restrictions": {
+      "value": "trademarked",
+      "source": "commons-desc-page",
+      "hidden": ""
+    },
+    "License": {
+      "value": "pd",
+      "source": "commons-templates",
+      "hidden": ""
+    }
+  },
+  "originalSHA256": "9b6acea0a1a760992b23754c0be41eaaa2fdac8d9b75ae3cc5218a1ade278192",
+  "modifications": "Removed editor metadata and external DTD; set explicit intrinsic SVG dimensions from viewBox. Artwork paths and colors unchanged."
+}
