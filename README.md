@@ -57,7 +57,6 @@ zsh scripts/build-distribution.sh
 | `Tests/` | Swift / Python 测试与隔离下载模拟 |
 | `scripts/` | 构建、打包和测试入口 |
 | `Package.swift` | Swift Package 定义 |
-| `REQUIREMENTS.md` | 功能需求与验收范围 |
 
 `research/`、`checkpoints/`、`test_photo/`、`.local/`、模型目录和构建产物均不入 Git。源码和常规构建不依赖本项目的 `research/`；第三方源码中保留的上游研究路径仅出现在注释和模型说明中。真实模型/媒体集成测试需要自行提供本地环境与样本。忽略规则也覆盖常见模型权重、RAW／照片／视频、私钥与签名证书；应用图标和已注明来源的纸纹作为项目资源显式保留。新增应用位图素材时需审查用途与授权，并更新 `.gitignore` 的白名单。图库默认存放在 `~/Library/Application Support/PhotoLab/`，不随源码分发。
 

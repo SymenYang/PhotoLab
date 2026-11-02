@@ -73,3 +73,6 @@ pytorch_model*.bin
 *.[mM][pP]4
 !/Resources/AppIcon-source.png
 !/Resources/Decorations/Paper001_Color.jpg
+
+# Local project planning document
+/REQUIREMENTS.md
